@@ -251,13 +251,21 @@ def preflight(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
     # Write run.meta and tool_versions.txt
     egress_ip = _get_egress_ip()
+    # Re-running some phases in an existing run dir keeps the record of the
+    # phases that already produced evidence there (the diff relies on it).
+    run_phases = list(ctx.phases)
+    old_meta = ctx.run_dir / "run.meta"
+    if old_meta.is_file():
+        for line in old_meta.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith("phases="):
+                run_phases = list(dict.fromkeys(line[len("phases="):].split() + run_phases))
     meta_content = (
         f"engagement={ctx.scope.engagement}\n"
         f"scope={ctx.scope.path}\n"
         f"date={ctx.run_date}\n"
         f"authorised_by={ctx.scope.authorised_by}\n"
         f"authorisation_ref={ctx.scope.authorisation_ref}\n"
-        f"phases={' '.join(ctx.phases)}\n"
+        f"phases={' '.join(run_phases)}\n"
         f"skip_active={'1' if ctx.skip_active else '0'}\n"
         f"use_docker={'1' if ctx.use_docker else '0'}\n"
         f"egress_ip={egress_ip}\n"

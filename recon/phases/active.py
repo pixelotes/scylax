@@ -13,6 +13,7 @@ from recon.config import RunContext
 from recon.deps import DependencyManager
 from recon.runner import Logger, ev, http_get, record_virtual_cmd, run_cmd
 from recon.scope import guard_for, ip_in, is_public_ip, parse_networks
+from recon.webprobe import PROBE_BYTES, discover_api, is_ingress_default_404, sniff_root_data
 
 
 WELL_KNOWN_PATHS: list[tuple[str, str, str]] = [
@@ -28,6 +29,9 @@ WELL_KNOWN_PATHS: list[tuple[str, str, str]] = [
     ("/server-status", "apache-status", r"Apache Server Status for"),
     ("/wp-json/wp/v2/users", "wp-users", r'"slug"\s*:.*"name"\s*:'),
     ("/robots.txt", "robots-disallow", r"(?i)Disallow:\s*/(admin|api|backup|private|internal|config|db|v1|v2)"),
+    ("/docs", "api-docs", r"swagger-ui|SwaggerUIBundle|redoc"),
+    ("/redoc", "api-docs", r"<redoc|Redoc\.init"),
+    ("/swagger-ui/index.html", "api-docs", r"swagger-ui|SwaggerUIBundle"),
 ]
 
 
@@ -56,6 +60,8 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
     httpx_all_txt = ctx.web_dir / "httpx_all.txt"
     httpx_lines: list[str] = []
+    # url -> (status, content_type, title, server)
+    url_meta: dict[str, tuple[int, str, str, str]] = {}
 
     if dm.is_available("httpx") and hosts:
         httpx_json = ctx.web_dir / "httpx_all.json"
@@ -106,6 +112,8 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                     webserver = str(item.get("webserver") or "")
                     location = str(item.get("location") or "")
                     httpx_lines.append(f"{url} [{status_code}] [{title}] [{webserver}] [{location}]")
+                    if status_code.isdigit():
+                        url_meta[url] = (int(status_code), str(item.get("content_type") or item.get("content-type") or ""), title, webserver)
     elif hosts:
         log.warn("httpx missing - using native Python HTTPS/HTTP probe (slower, no tech-detect)")
         for h in hosts:
@@ -121,6 +129,7 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 server = resp.headers.get("server", "")
                 location = resp.redirect_url or resp.headers.get("location", "")
                 httpx_lines.append(f"{scheme}://{h} [{resp.status}] [{title}] [{server}] [{location}]")
+                url_meta[f"{scheme}://{h}"] = (resp.status, resp.headers.get("content-type", ""), title, server)
                 break
             time.sleep(0.05)
 
@@ -157,6 +166,7 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     )
 
     dir_files_output: list[str] = []
+    listed_data_rows: list[str] = []
     for line in dir_listing_lines:
         parts = line.split()
         if not parts:
@@ -168,7 +178,20 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         matches = re.findall(r'<a\s+href="[^"]*">[^<]*</a>', resp.body, re.IGNORECASE)
         for tag in matches[:50]:
             dir_files_output.append(tag)
-        dir_files_output.append("# contents NOT downloaded")
+        # Peek at the header row of listed data files to tell an information
+        # leak from a personal-data exposure (first few KB only).
+        for href in re.findall(r'<a\s+href="([^"?#]+\.(?:csv|tsv|json|txt|xlsx?|sql|bak|zip))"', resp.body, re.IGNORECASE)[:20]:
+            file_url = urllib.parse.urljoin(url_fetch, href)
+            if not guard.url_allowed(file_url):
+                continue
+            fr = http_get(file_url, timeout=10.0, verify_ssl=False, follow_redirects=False, max_bytes=PROBE_BYTES)
+            data = sniff_root_data(file_url, fr)
+            if data:
+                listed_data_rows.append(
+                    f"{data.url}\t{data.content_type}\t{data.size}\t{','.join(data.columns[:40])}\t{','.join(data.sensitive)}"
+                )
+                dir_files_output.append(f"# {href}: {data.size} bytes, columns: {','.join(data.columns[:15])}")
+        dir_files_output.append("# contents NOT downloaded (header row only)")
 
     (ctx.web_dir / "dir_listings_files.txt").write_text(
         "\n".join(dir_files_output) + ("\n" if dir_files_output else ""), encoding="utf-8"
@@ -187,7 +210,13 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         if not m:
             continue
         code = int(m.group(1))
-        if code not in (200, 301, 302, 401, 403):
+        if code == 404:
+            # The ingress catch-all 404 says nothing; an application's own 404
+            # (e.g. FastAPI's JSON) means routes exist that are worth checking.
+            _, ct, title, server = url_meta.get(u, (404, "", "", ""))
+            if is_ingress_default_404(404, ct, title, server):
+                continue
+        elif code not in (200, 301, 302, 401, 403):
             continue
         if not guard.url_allowed(u):
             continue
@@ -197,15 +226,13 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         if base and base not in seen_bases:
             seen_bases.add(base)
             live_base_urls.append(base)
-            if len(live_base_urls) >= 40:
-                break
 
     exposed_rows: list[str] = []
     for base_url in live_base_urls:
         for path, category, regex in WELL_KNOWN_PATHS:
             target_url = f"{base_url}{path}"
-            resp = http_get(target_url, timeout=8.0, verify_ssl=False, follow_redirects=False)
-            if resp.status == 200:
+            resp = http_get(target_url, timeout=8.0, verify_ssl=False, follow_redirects=False, max_bytes=65536)
+            if resp.status in (200, 206):
                 m = re.search(regex, resp.body, re.MULTILINE)
                 if m:
                     snippet = m.group(0).strip().replace("\t", " ").replace("\r", " ").replace("\n", " ")[:120]
@@ -214,6 +241,33 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
     (ctx.web_dir / "exposed_paths.tsv").write_text(
         "\n".join(exposed_rows) + ("\n" if exposed_rows else ""), encoding="utf-8"
+    )
+
+    # Data files served at the web root (CSV/JSON/downloads) and API endpoints
+    # published through OpenAPI. Only a few KB are read: enough to see the
+    # columns, never the dataset.
+    root_rows: list[str] = list(listed_data_rows)
+    api_rows: list[str] = []
+    for base_url in live_base_urls:
+        status0, ct0, title0, _ = url_meta.get(base_url, url_meta.get(base_url + "/", (0, "", "", "")))
+        if status0 in (200, 206) and "html" not in ct0.lower():
+            r = http_get(f"{base_url}/", timeout=10.0, verify_ssl=False, follow_redirects=False, max_bytes=PROBE_BYTES)
+            data = sniff_root_data(f"{base_url}/", r)
+            if data:
+                root_rows.append(
+                    f"{data.url}\t{data.content_type}\t{data.size}\t{','.join(data.columns[:40])}\t{','.join(data.sensitive)}"
+                )
+        schema_url, endpoints = discover_api(base_url, http_get)
+        for ep in endpoints:
+            api_rows.append(
+                f"{ep.url}\t{ep.status}\t{ep.content_type}\t{ep.size}\t{','.join(ep.sensitive)}\t{schema_url}"
+            )
+        time.sleep(0.05)
+    (ctx.web_dir / "root_data.tsv").write_text(
+        "\n".join(root_rows) + ("\n" if root_rows else ""), encoding="utf-8"
+    )
+    (ctx.web_dir / "api_endpoints.tsv").write_text(
+        "\n".join(api_rows) + ("\n" if api_rows else ""), encoding="utf-8"
     )
 
     # CORS & Cookie Hygiene (ctx.web_dir / "cors_cookies.tsv")
@@ -267,6 +321,10 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         *(f"  {r}" for r in exposed_rows[:10]),
         f"CORS & Cookie hygiene checks across {len(live_base_urls)} live hosts: {len(cors_cookie_rows)} findings",
         *(f"  {r}" for r in cors_cookie_rows[:10]),
+        f"Data files at web root: {len(root_rows)}",
+        *(f"  {r}" for r in root_rows[:10]),
+        f"API endpoints from published OpenAPI schemas: {len(api_rows)}",
+        *(f"  {r}" for r in api_rows[:10]),
     ]
     record_virtual_cmd(
         console_dir=ctx.console_dir,
@@ -278,7 +336,8 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
     log.ok(
         f"{len(httpx_lines)} live web hosts, {len(dir_listing_lines)} directory listings, "
-        f"{len(exposed_rows)} exposed paths, {len(cors_cookie_rows)} CORS/cookie findings"
+        f"{len(exposed_rows)} exposed paths, {len(cors_cookie_rows)} CORS/cookie findings, "
+        f"{len(root_rows)} root data files, {len(api_rows)} API endpoints"
     )
 
 

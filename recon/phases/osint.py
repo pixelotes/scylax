@@ -44,6 +44,16 @@ def phase1(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     ctx.ensure_dirs()
 
     all_raw_lines: list[str] = []
+    # Certificate Transparency: first certificate date per hostname
+    ct_first_seen: dict[str, str] = {}
+
+    def _ct_note(name: str, not_before: str) -> None:
+        name = name.strip().lower()
+        if name.startswith("*."):
+            name = name[2:]
+        day = str(not_before or "")[:10]
+        if name and day and (name not in ct_first_seen or day < ct_first_seen[name]):
+            ct_first_seen[name] = day
 
     for d in ctx.scope.domains:
         # 1. subfinder
@@ -81,6 +91,7 @@ def phase1(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                     if isinstance(item, dict) and "name_value" in item:
                         nv_raw = str(item["name_value"])
                         for name_line in nv_raw.splitlines():
+                            _ct_note(name_line, item.get("not_before", ""))
                             nl = name_line.strip().lower()
                             if nl.startswith("*."):
                                 nl = nl[2:]
@@ -96,7 +107,18 @@ def phase1(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
             title=f"crt.sh ({d})",
         )
         if status != 200:
-            log.warn(f"crt.sh returned HTTP {status} for {d} (CT coverage relies on subfinder + amass)")
+            # crt.sh is often overloaded: fall back to SSLMate certspotter (keyless, rate limited)
+            cs_names = _certspotter_names(d, _ct_note)
+            all_raw_lines.extend(cs_names)
+            record_virtual_cmd(
+                ctx.console_dir,
+                "1",
+                f"curl -s 'https://api.certspotter.com/v1/issuances?domain={d}&include_subdomains=true&expand=dns_names'",
+                f"{len(cs_names)} names",
+                title=f"certspotter ({d})",
+            )
+            if not cs_names:
+                log.warn(f"crt.sh returned HTTP {status} and certspotter returned nothing for {d} (CT coverage relies on subfinder + amass)")
 
         # Always include d itself
         all_raw_lines.append(d)
@@ -127,6 +149,10 @@ def phase1(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         counts_lines.append(f"{d} {c}\n")
 
     (ctx.osint_dir / "subdomain_counts.txt").write_text("".join(counts_lines), encoding="utf-8")
+    (ctx.osint_dir / "ct_first_seen.tsv").write_text(
+        "".join(f"{h}\t{ct_first_seen[h]}\n" for h in sorted(ct_first_seen) if pattern.search(h)),
+        encoding="utf-8",
+    )
     log.ok(f"{len(subdomains)} subdomains")
 
     # Diff against previous run
@@ -148,6 +174,32 @@ def phase1(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 "".join(f"{s}\n" for s in gone_subs), encoding="utf-8"
             )
             log.ok(f"vs {ctx.prev_run_dir.name}: {len(new_subs)} new, {len(gone_subs)} gone")
+
+
+def _certspotter_names(domain: str, note, max_pages: int = 20) -> list[str]:
+    """Hostnames for ``domain`` from SSLMate certspotter, recording first-seen dates."""
+    names: list[str] = []
+    after = ""
+    for _ in range(max_pages):
+        url = (
+            f"https://api.certspotter.com/v1/issuances?domain={urllib.parse.quote(domain)}"
+            f"&include_subdomains=true&expand=dns_names" + (f"&after={after}" if after else "")
+        )
+        st, data = http_get_json(url, timeout=60)
+        if st != 200 or not isinstance(data, list) or not data:
+            break
+        for item in data:
+            for n in item.get("dns_names") or []:
+                n = str(n).strip().lower()
+                if n.startswith("*."):
+                    n = n[2:]
+                if n:
+                    names.append(n)
+                    note(n, item.get("not_before", ""))
+        after = str(data[-1].get("id", ""))
+        if not after:
+            break
+    return names
 
 
 def phase2(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:

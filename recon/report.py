@@ -213,7 +213,7 @@ class RunData:
     def _load_diff(self) -> tuple[str, dict[str, list[str]]]:
         diff_path = self.run_dir / "diff.md"
         content = _safe_read_text(diff_path)
-        summary: dict[str, list[str]] = {"New": [], "Resolved": [], "Persisting": []}
+        summary: dict[str, list[str]] = {"New": [], "Reappeared": [], "Resolved": [], "Not re-checked": [], "Persisting": []}
         if content:
             cur_section = ""
             for line in content.splitlines():
@@ -224,6 +224,10 @@ class RunData:
                     cur_section = "Resolved"
                 elif s.startswith("## Persisting"):
                     cur_section = "Persisting"
+                elif s.startswith("## Reappeared"):
+                    cur_section = "Reappeared"
+                elif s.startswith("## Not re-checked"):
+                    cur_section = "Not re-checked"
                 elif cur_section and s.startswith("- "):
                     summary[cur_section].append(s[2:].strip())
         return content, summary

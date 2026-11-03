@@ -233,7 +233,11 @@ def http_get(
     verify_ssl: bool = True,
     follow_redirects: bool = True,
     method: str = "GET",
+    max_bytes: int | None = None,
 ) -> HttpResponse:
+    """GET a URL. ``max_bytes`` caps how much of the body is read (and asks the
+    server for that range), so probes can classify a response without
+    downloading it."""
     ctx = ssl.create_default_context()
     if not verify_ssl:
         ctx.check_hostname = False
@@ -245,6 +249,8 @@ def http_get(
 
     opener = urllib.request.build_opener(*handlers)
     req_headers = {"User-Agent": "Scylax/1.0"}
+    if max_bytes:
+        req_headers["Range"] = f"bytes=0-{max_bytes - 1}"
     if headers:
         req_headers.update(headers)
     req = urllib.request.Request(
@@ -254,7 +260,7 @@ def http_get(
     )
     try:
         with opener.open(req, timeout=timeout) as resp:
-            raw_bytes = resp.read() if method != "HEAD" else b""
+            raw_bytes = resp.read(max_bytes) if method != "HEAD" else b""
             headers = {k.lower(): v for k, v in resp.headers.items()}
             return HttpResponse(
                 status=resp.status,
@@ -265,7 +271,7 @@ def http_get(
             )
     except urllib.error.HTTPError as exc:
         try:
-            err_body = exc.read().decode("utf-8", errors="replace") if method != "HEAD" else ""
+            err_body = exc.read(max_bytes).decode("utf-8", errors="replace") if method != "HEAD" else ""
         except Exception:
             err_body = ""
         headers = {k.lower(): v for k, v in exc.headers.items()} if exc.headers else {}

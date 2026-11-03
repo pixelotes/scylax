@@ -11,6 +11,7 @@ import urllib.parse
 from recon.config import RunContext
 from recon.deps import DependencyManager
 from recon.report import generate_reports
+from recon.webprobe import is_hash_label, is_ingress_default_404
 from recon.runner import (
     Logger,
     http_get,
@@ -252,7 +253,7 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                         f"Sensitive configuration/source exposed ({category})",
                         f"{url} ({snippet})",
                     )
-                elif category in ("api-schema", "graphql", "apache-status", "wp-users", "actuator"):
+                elif category in ("api-schema", "api-docs", "graphql", "apache-status", "wp-users", "actuator"):
                     add(
                         "medium",
                         f"exposed-api:{url}",
@@ -266,6 +267,102 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                         "Sensitive paths disclosed in robots.txt",
                         f"{url} ({snippet})",
                     )
+
+    # Data files served without authentication: at the web root, inside a
+    # directory listing, or behind an OpenAPI-described endpoint.
+    def _kb(size: str) -> str:
+        return f"{int(size) // 1024} KB" if size.isdigit() else "size unknown"
+
+    root_file = ctx.web_dir / "root_data.tsv"
+    if root_file.is_file():
+        for line in root_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            parts = line.split("\t")
+            if len(parts) < 3:
+                continue
+            url, ctype, size = parts[0], parts[1], parts[2]
+            cols = parts[3] if len(parts) > 3 else ""
+            sensitive = parts[4] if len(parts) > 4 else ""
+            host = urllib.parse.urlparse(url).hostname or url
+            if sensitive:
+                add("critical", f"data-export:{host}", "Unauthenticated data export with personal or secret fields",
+                    f"{url} ({ctype}, {_kb(size)}; fields: {sensitive})")
+            else:
+                add("high", f"data-export:{host}", "Unauthenticated data file served",
+                    f"{url} ({ctype}, {_kb(size)}; columns: {cols[:120]})")
+
+    api_file = ctx.web_dir / "api_endpoints.tsv"
+    if api_file.is_file():
+        for line in api_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            parts = line.split("\t")
+            if len(parts) < 4 or parts[1] not in ("200", "206"):
+                continue
+            url, _, ctype, size = parts[:4]
+            sensitive = parts[4] if len(parts) > 4 else ""
+            host = urllib.parse.urlparse(url).hostname or url
+            bulky = size.isdigit() and int(size) >= 10 * 1024
+            if sensitive:
+                add("critical", f"api-data:{host}", "Unauthenticated API endpoint returns personal or secret data",
+                    f"{url} ({ctype}, {_kb(size)}; fields: {sensitive})")
+            elif bulky or any(t in ctype for t in ("csv", "octet-stream", "spreadsheet")):
+                add("high", f"api-data:{host}", "Unauthenticated API endpoint returns bulk data",
+                    f"{url} ({ctype}, {_kb(size)})")
+
+    # Hostnames that only rely on being unguessable. TLS certificates publish
+    # every hostname in Certificate Transparency logs, so a hashed name is not
+    # a secret: flag the ones that answer without authentication.
+    ct_seen: dict[str, str] = {}
+    ct_file = ctx.osint_dir / "ct_first_seen.tsv"
+    if ct_file.is_file():
+        for line in ct_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            cols = line.split("\t")
+            if len(cols) == 2:
+                ct_seen[cols[0]] = cols[1]
+    httpx_meta: dict[str, tuple[str, str, str]] = {}
+    httpx_json_file = ctx.web_dir / "httpx_all.json"
+    if httpx_json_file.is_file():
+        for line in httpx_json_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            h = urllib.parse.urlparse(str(item.get("url") or "")).hostname or ""
+            httpx_meta[h] = (
+                str(item.get("content_type") or ""),
+                str(item.get("title") or ""),
+                str(item.get("webserver") or ""),
+            )
+    httpx_all_file = ctx.web_dir / "httpx_all.txt"
+    if httpx_all_file.is_file():
+        for line in httpx_all_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            m = re.match(r"^(\S+)\s+\[(\d{3})\]", line)
+            if not m:
+                continue
+            host = urllib.parse.urlparse(m.group(1)).hostname or ""
+            code = int(m.group(2))
+            if not is_hash_label(host) or code in (401, 403, 407):
+                continue
+            ct, title, server = httpx_meta.get(host, ("", "", ""))
+            if code >= 500 or is_ingress_default_404(code, ct, title, server):
+                continue
+            first = ct_seen.get(host, "")
+            add(
+                "medium",
+                f"hash-host:{host}",
+                "Service protected only by an unguessable hostname (public in CT logs)",
+                f"{host} [{code}]" + (f", first certificate {first}" if first else ""),
+            )
+
+    new_subs_file = ctx.osint_dir / "new_subdomains.txt"
+    if new_subs_file.is_file():
+        new_subs = [l.strip() for l in new_subs_file.read_text(encoding="utf-8").splitlines() if l.strip()]
+        if new_subs:
+            hashed = [h for h in new_subs if is_hash_label(h)]
+            add(
+                "info",
+                "new-hostnames",
+                f"{len(new_subs)} new hostnames since the previous run ({len(hashed)} hash-like)",
+                ", ".join((hashed + [h for h in new_subs if h not in hashed])[:12]),
+            )
 
     cors_file = ctx.web_dir / "cors_cookies.tsv"
     if cors_file.is_file():
@@ -835,52 +932,60 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
     (ctx.run_dir / "findings_auto.md").write_text("\n".join(md_lines) + "\n", encoding="utf-8")
 
-    # Diff against previous run if available
+    # Diff against the previous run and the scope-wide finding history
+    curr_map: dict[str, tuple[str, str, str, str]] = {}
+    for item in deduped:
+        curr_map.setdefault(item[1], item)
+    history = _update_history(ctx, curr_map)
+
     if ctx.prev_run_dir is not None and (ctx.prev_run_dir / "findings_auto.tsv").is_file():
         prev_tsv = ctx.prev_run_dir / "findings_auto.tsv"
         prev_map: dict[str, tuple[str, str, str, str]] = {}
         for line in prev_tsv.read_text(encoding="utf-8", errors="replace").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            parts = line.split("\t")
+            parts = line.strip().split("\t")
             if len(parts) >= 4:
-                k = parts[1].strip()
-                if k not in prev_map:
-                    prev_map[k] = (
-                        parts[0].strip(),
-                        k,
-                        parts[2].strip(),
-                        parts[3].strip(),
-                    )
+                prev_map.setdefault(parts[1].strip(), (parts[0].strip(), parts[1].strip(), parts[2].strip(), parts[3].strip()))
 
-        curr_map: dict[str, tuple[str, str, str, str]] = {}
-        for item in deduped:
-            k = item[1]
-            if k not in curr_map:
-                curr_map[k] = item
+        curr_phases = _run_phases(ctx.run_dir)
+        prev_phases = _run_phases(ctx.prev_run_dir)
+        prev_keys = set(prev_map)
+        curr_keys = set(curr_map)
 
-        prev_keys = set(prev_map.keys())
-        curr_keys = set(curr_map.keys())
+        def _checked_in_both(key: str) -> bool:
+            ph = finding_phase(key)
+            # Unknown origin, or run.meta missing: assume it was checked
+            return ph is None or not curr_phases or not prev_phases or (ph in curr_phases and ph in prev_phases)
 
-        new_keys = sorted(curr_keys - prev_keys)
-        resolved_keys = sorted(prev_keys - curr_keys)
+        gone = prev_keys - curr_keys
+        resolved_keys = sorted(k for k in gone if _checked_in_both(k))
+        unchecked_keys = sorted(k for k in gone if not _checked_in_both(k))
+        new_all = curr_keys - prev_keys
+        reappeared_keys = sorted(k for k in new_all if len(history.get(k, {}).get("seen", [])) > 1)
+        new_keys = sorted(k for k in new_all if k not in reappeared_keys)
         persisting_keys = sorted(curr_keys & prev_keys)
 
-        diff_lines: list[str] = [
-            f"# Changes {ctx.prev_run_dir.name} -> {ctx.run_date}",
-        ]
-        for section_name, keys, src in (
-            ("New", new_keys, curr_map),
-            ("Resolved", resolved_keys, prev_map),
-            ("Persisting", persisting_keys, curr_map),
+        def _age(key: str) -> str:
+            h = history.get(key, {})
+            seen = h.get("seen", [])
+            return f" _(open since {h.get('first_seen', '?')}, {len(seen)} runs)_" if seen else ""
+
+        diff_lines: list[str] = [f"# Changes {ctx.prev_run_dir.name} -> {ctx.run_date}"]
+        for section_name, keys, src, with_age in (
+            ("New", new_keys, curr_map, False),
+            ("Reappeared", reappeared_keys, curr_map, True),
+            ("Resolved", resolved_keys, prev_map, False),
+            ("Not re-checked", unchecked_keys, prev_map, False),
+            ("Persisting", persisting_keys, curr_map, True),
         ):
             diff_lines.append("")
             diff_lines.append(f"## {section_name} ({len(keys)})")
             diff_lines.append("")
-            for k in keys:
+            if section_name == "Not re-checked" and keys:
+                diff_lines.append("_The phase that produces these was not run this time; status unknown._")
+                diff_lines.append("")
+            for k in sorted(keys, key=lambda x: (SEVERITY_ORDER.get(src[x][0], 99), x)):
                 f_item = src[k]
-                diff_lines.append(f"- **{f_item[0]}** {f_item[2]} - {f_item[3]}")
+                diff_lines.append(f"- **{f_item[0]}** {f_item[2]} - {f_item[3]}" + (_age(k) if with_age else ""))
 
         (ctx.run_dir / "diff.md").write_text("\n".join(diff_lines) + "\n", encoding="utf-8")
         log.ok(f"diff vs {ctx.prev_run_dir.name} in diff.md")
@@ -895,3 +1000,64 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
     md_path, html_path = generate_reports(ctx.run_dir)
     log.ok(f"{len(deduped)} candidates -> findings_auto.md, report.md, report.html")
+
+
+# Which phase produces each finding key (by prefix). Used so that a run that
+# skipped a phase does not report that phase's findings as "resolved".
+_PHASE_BY_PREFIX: tuple[tuple[str, str], ...] = (
+    ("new-hostnames", "1"),
+    ("spf:", "2"), ("dmarc:", "2"), ("caa:", "2"), ("dnssec:", "2"), ("axfr:", "2"),
+    ("wildcard:", "2"), ("whois:", "2"), ("apex:", "2"), ("internal-name:", "2"),
+    ("dirlist:", "3"), ("exposed-path:", "3"), ("exposed-api:", "3"), ("robots:", "3"),
+    ("cors:", "3"), ("cookie:", "3"), ("headers:", "3"), ("data-export:", "3"),
+    ("api-data:", "3"), ("hash-host:", "3"), ("redirect-", "3"),
+    ("mgmt:", "4"), ("ssh:", "4"), ("ssh-weak:", "4"), ("apache:", "4"), ("nginx:", "4"),
+    ("routeros:", "4"), ("fakecert:", "4"), ("fw-admin:", "4"), ("cert-expired:", "4"), ("502:", "4"),
+    ("entrypoint:", "6"), ("wayback-", "6"),
+    ("cve-", "7"),
+    ("nuclei:", "8"),
+)
+
+
+def finding_phase(key: str) -> str | None:
+    for prefix, phase in _PHASE_BY_PREFIX:
+        if key.startswith(prefix):
+            return phase
+    return None
+
+
+def _run_phases(run_dir: Path) -> set[str]:
+    meta = run_dir / "run.meta"
+    if not meta.is_file():
+        return set()
+    for line in meta.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith("phases="):
+            phases = set(line[len("phases="):].split())
+            # Phase 4b (edge devices) produces the same finding types as 4
+            if "4b" in phases:
+                phases.add("4")
+            return phases
+    return set()
+
+
+def _update_history(ctx: RunContext, curr_map: dict[str, tuple[str, str, str, str]]) -> dict[str, dict]:
+    """Record in runs/<scope>/findings_history.json the run dates each finding
+    key was seen on, so persisting and reappearing findings can be aged."""
+    path = ctx.root / "runs" / ctx.scope.name / "findings_history.json"
+    try:
+        history = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except (json.JSONDecodeError, OSError):
+        history = {}
+    for key, (sev, _, title, _) in curr_map.items():
+        h = history.setdefault(key, {"first_seen": ctx.run_date, "seen": []})
+        if ctx.run_date not in h["seen"]:
+            h["seen"].append(ctx.run_date)
+            h["seen"].sort()
+        h["first_seen"] = min(h["first_seen"], ctx.run_date)
+        h["severity"], h["title"] = sev, title
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(history, indent=1, sort_keys=True), encoding="utf-8")
+    except OSError:
+        pass
+    return history

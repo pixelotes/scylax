@@ -369,25 +369,40 @@ Key settings in `scopes/example.toml`:
 ## Outputs
 
 ```text
+runs/<scope>/
+  findings_history.json    Every finding key with the run dates it was seen on (ages persisting / reappearing findings)
 runs/<scope>/<date>/
   report.html              Interactive dark-mode HTML dashboard (6 tabs + CLI terminal explorer)
   report.md                Comprehensive Markdown report with collapsible CLI evidence
   findings_auto.md / .tsv  Prioritised finding candidates
-  diff.md                  New / Resolved / Persisting findings vs previous run
+  diff.md                  New / Reappeared / Resolved / Not re-checked / Persisting findings vs previous run
+                           (a finding only counts as resolved if its phase ran in both runs)
   run.meta                 Scope, date, authorisation, phases, Docker mode, egress IP
   tool_versions.txt        Detected tool versions / Docker images
   gaps.txt                 Missing optional tools, skipped checks, or API timeouts
   console/
     commands.jsonl         Structured log of every command, exit code, duration, and output
     <phase>.log            Plain-text "$ command + output" captures per phase
-  osint/                   Subdomains, DNS posture, WHOIS, apex, IP orgs, discovered targets, Wayback, entry points, Shodan, hibp_breaches.tsv, service_cves.tsv
-  web/                     httpx results, exposed API/config paths, CORS/cookies, directory listings, tech, nuclei
+  osint/                   Subdomains (+ new_subdomains.txt), ct_first_seen.tsv (first certificate per host; certspotter fallback), skipped_targets.tsv, DNS posture, WHOIS, apex, IP orgs, discovered targets, Wayback, entry points, Shodan, hibp_breaches.tsv, service_cves.tsv
+  web/                     httpx results, exposed API/config paths, CORS/cookies, directory listings (+ header row of listed data files), tech, nuclei,
+                           root_data.tsv (data files served at a web root: type, size, columns, sensitive fields),
+                           api_endpoints.tsv (parameterless GET endpoints from published OpenAPI schemas: status, type, size)
   scan/                    nmap outputs (.nmap, .xml, .gnmap) for HVTs, auto-discovered IPs, and edge devices
   azure/                   Azure public IPs, Internet NSG rules, scans, posture_findings.tsv, coverage.txt
   gcp/                     GCP public IPs, VPC Internet firewall rules, scans, posture_findings.tsv, coverage.txt
   aws/                     AWS public IPs, public endpoints, Internet SG rules, scans, posture_findings.tsv, coverage.txt
   saas/                    SaaS posture_findings.tsv, raw API responses per provider (<provider>/raw/)
 ```
+
+---
+
+## Monthly runs (CTEM)
+
+- Use a fresh `runs/<scope>/<date>/` per run so `diff.md` and `findings_history.json` have a baseline.
+- Set `owned_ips_file` (e.g. the Azure public-IP export) so CDN/SaaS/shared-cloud IPs are never port-scanned.
+- Prefer a full run (no `-q`/`-qq`) once a month; quick modes are for ad-hoc checks.
+- Export `NVD_API_KEY` when `*.shodan.io` is blocked: CVE correlation then uses NVD at ~10x the keyless rate.
+- Data probes read at most 4 KB per URL (header row / schema) and never download datasets; the full size is taken from `Content-Range` / `Content-Length`.
 
 ---
 
