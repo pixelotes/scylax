@@ -291,7 +291,7 @@ Key settings in `scopes/example.toml`:
 ## Running it
 
 ```text
-./scylax.py -s SCOPE_FILE [-p "PHASES"] [-d DATE] [-P] [-n] [-y] [-D] [--no-venv] [--cloud-posture] [--saas-posture] [--prowler] [--check-deps] [--report-only DIR]
+./scylax.py -s SCOPE_FILE [-p "PHASES"] [-d DATE] [-P] [-q | -qq] [-n] [-y] [-D] [--no-venv] [--cloud-posture] [--saas-posture] [--prowler] [--check-deps] [--report-only DIR]
 ```
 
 | Option | Meaning |
@@ -307,7 +307,7 @@ Key settings in `scopes/example.toml`:
 | `--prowler` | Enable deep Prowler CSPM assessment during cloud posture checks (or `USE_PROWLER=1`) |
 | `--shodan-key KEY` | Shodan API key for phase 7 host lookups (or `SHODAN_API_KEY`) |
 | `--hibp-key KEY` | HaveIBeenPwned API key for domain/account breach audit (or `HIBP_API_KEY`) |
-| `-q`, `--quick` | Quick port scan: scans top 1,000 ports instead of all 65,535 in Phase 4 (or `QUICK=1`) |
+| `-q`, `--quick` | Quick port scan in Phase 4: `-q` scans the top 1,000 ports and `-qq` the top 100, instead of all 65,535 (or `QUICK=1` / `QUICK=2`). `--top-ports` takes precedence |
 | `--top-ports N` | Specific number of top ports to scan with Nmap (e.g. `100`, `1000`) |
 | `-y`, `--yes` | Skip interactive confirmation prompt before active phases (or `YES=1`) |
 | `--authorised-by NAME` | Written authorisation name/role for active phases (or `AUTHORISED_BY`) |

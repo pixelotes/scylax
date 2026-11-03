@@ -926,7 +926,7 @@ def check_pwned_password(password: str, timeout: float = 10.0) -> int:
     url = f"https://api.pwnedpasswords.com/range/{prefix}"
     resp = http_get(
         url,
-        headers={"User-Agent": "auto-pentest-pipeline/1.0", "Add-Padding": "true"},
+        headers={"User-Agent": "Scylax/1.0", "Add-Padding": "true"},
         timeout=timeout,
     )
     if resp.status == 200 and resp.body:
@@ -1073,7 +1073,7 @@ def run_hibp_breaches(
     log.info("Checking HaveIBeenPwned domain & corporate account breach exposure")
     domain_breaches: list[dict[str, Any]] = []
     account_breaches: list[dict[str, Any]] = []
-    headers = {"hibp-api-key": api_key, "User-Agent": "auto-pentest-pipeline/1.0"}
+    headers = {"hibp-api-key": api_key, "User-Agent": "Scylax/1.0"}
 
     # 1. Domain breaches
     for i, d in enumerate(ctx.scope.domains):

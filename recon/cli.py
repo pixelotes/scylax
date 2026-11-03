@@ -126,9 +126,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-q",
         "--quick",
-        action="store_true",
-        default=(os.environ.get("QUICK") == "1"),
-        help="quick port scan: scans top 1000 ports instead of all 65535 ports in phase 4 (or QUICK=1)",
+        action="count",
+        default=(int(os.environ["QUICK"]) if os.environ.get("QUICK", "").isdigit() else 0),
+        help="quick port scan in phase 4: -q scans the top 1000 ports, -qq the top 100, instead of all 65535 (or QUICK=1 / QUICK=2)",
     )
     parser.add_argument(
         "--top-ports",
@@ -336,7 +336,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         use_prowler=bool(args.use_prowler or scope.use_prowler),
         saas_posture=bool(args.saas_posture or scope.saas_posture),
         quick_scan=bool(args.quick or scope.quick_scan),
-        top_ports=(args.top_ports if args.top_ports is not None else scope.top_ports),
+        top_ports=(
+            args.top_ports if args.top_ports is not None
+            else scope.top_ports if scope.top_ports is not None
+            else (100 if args.quick >= 2 else None)
+        ),
     )
     ctx.ensure_dirs()
     log.gaps_file = ctx.run_dir / "gaps.txt"

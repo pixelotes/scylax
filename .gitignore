@@ -1,0 +1,11 @@
+# Real scopes contain target IPs and authorisation details; only the example is versioned
+scopes/*.toml
+!scopes/example.toml
+
+# Assessment evidence and reports
+runs/
+
+# Python
+__pycache__/
+*.pyc
+.venv/

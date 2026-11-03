@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Entry point for the External Attack Surface Assessment & Reconnaissance Pipeline."""
 import sys
+
+if sys.version_info < (3, 11):
+    sys.exit(f"Scylax requires Python 3.11 or newer (found {sys.version.split()[0]}).")
+
 from pathlib import Path
 
 _repo_root = Path(__file__).resolve().parent

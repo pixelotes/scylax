@@ -73,7 +73,7 @@ def http_json(
     Retries on 429/5xx honouring ``Retry-After``. Status 0 means a network error.
     """
     data = None
-    hdrs = {"User-Agent": "recon-pipeline/1.0", "Accept": "application/json"}
+    hdrs = {"User-Agent": "Scylax/1.0", "Accept": "application/json"}
     if headers:
         hdrs.update(headers)
     if form is not None:

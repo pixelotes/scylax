@@ -218,7 +218,7 @@ def http_get(
         handlers.append(_NoRedirectHandler())
 
     opener = urllib.request.build_opener(*handlers)
-    req_headers = {"User-Agent": "recon-pipeline/1.0"}
+    req_headers = {"User-Agent": "Scylax/1.0"}
     if headers:
         req_headers.update(headers)
     req = urllib.request.Request(
