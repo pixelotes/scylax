@@ -35,6 +35,26 @@ WELL_KNOWN_PATHS: list[tuple[str, str, str]] = [
 ]
 
 
+def _native_http_probe(hosts: list[str], workers: int = 16) -> list[tuple[str, int, str, str, str, str]]:
+    """httpx-like probe in pure Python: (url, status, title, server, location, content_type)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def probe(h: str) -> tuple[str, int, str, str, str, str] | None:
+        for scheme in ("https", "http"):
+            url = f"{scheme}://{h}"
+            resp = http_get(f"{url}/", timeout=8.0, verify_ssl=False, follow_redirects=False, max_bytes=PROBE_BYTES)
+            if resp.status == 0:
+                continue
+            m = re.search(r"<title[^>]*>(.*?)</title>", resp.body, re.IGNORECASE | re.DOTALL)
+            title = re.sub(r"<[^>]*>", "", m.group(1)).strip().replace("\r", " ").replace("\n", " ") if m else ""
+            location = resp.redirect_url or resp.headers.get("location", "")
+            return (url, resp.status, title, resp.headers.get("server", ""), location, resp.headers.get("content-type", ""))
+        return None
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return [r for r in pool.map(probe, hosts) if r]
+
+
 def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     """Phase 3: Live web host discovery, exposed paths/APIs, and CORS/cookie hygiene."""
     log.info("Phase 3 - live web host discovery, well-known paths & header/cookie hygiene")
@@ -63,9 +83,10 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     # url -> (status, content_type, title, server)
     url_meta: dict[str, tuple[int, str, str, str]] = {}
 
-    if dm.is_available("httpx") and hosts:
-        httpx_json = ctx.web_dir / "httpx_all.json"
-        ev(
+    httpx_json = ctx.web_dir / "httpx_all.json"
+    use_native = not dm.is_available("httpx")
+    if not use_native and hosts:
+        httpx_res = ev(
             ctx.console_dir,
             "3",
             dm.build_cmd(
@@ -114,24 +135,24 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                     httpx_lines.append(f"{url} [{status_code}] [{title}] [{webserver}] [{location}]")
                     if status_code.isdigit():
                         url_meta[url] = (int(status_code), str(item.get("content_type") or item.get("content-type") or ""), title, webserver)
-    elif hosts:
-        log.warn("httpx missing - using native Python HTTPS/HTTP probe (slower, no tech-detect)")
-        for h in hosts:
-            for scheme in ("https", "http"):
-                probe_url = f"{scheme}://{h}/"
-                resp = http_get(probe_url, timeout=8.0, verify_ssl=False, follow_redirects=False)
-                if resp.status == 0:
-                    continue
-                m = re.search(r"<title[^>]*>(.*?)</title>", resp.body, re.IGNORECASE | re.DOTALL)
-                title = ""
-                if m:
-                    title = re.sub(r"<[^>]*>", "", m.group(1)).strip().replace("\r", " ").replace("\n", " ")
-                server = resp.headers.get("server", "")
-                location = resp.redirect_url or resp.headers.get("location", "")
-                httpx_lines.append(f"{scheme}://{h} [{resp.status}] [{title}] [{server}] [{location}]")
-                url_meta[f"{scheme}://{h}"] = (resp.status, resp.headers.get("content-type", ""), title, server)
-                break
-            time.sleep(0.05)
+        if not httpx_lines:
+            # A failed httpx (e.g. Docker daemon down) must not look like "no live hosts"
+            err = (httpx_res.stderr or httpx_res.stdout or "").strip().splitlines()
+            log.warn(
+                f"httpx produced no results (exit {httpx_res.returncode}: {err[-1][:120] if err else 'no output'}) "
+                "- falling back to native Python probe"
+            )
+            use_native = True
+    if use_native and hosts:
+        log.warn("httpx unavailable - using native Python HTTPS/HTTP probe (slower, no tech-detect)")
+        native = _native_http_probe(hosts, workers=16)
+        with httpx_json.open("w", encoding="utf-8") as jf:
+            for url, status, title, server, location, ctype in native:
+                httpx_lines.append(f"{url} [{status}] [{title}] [{server}] [{location}]")
+                url_meta[url] = (status, ctype, title, server)
+                # Same shape as httpx -json so later phases and triage can use it
+                jf.write(json.dumps({"url": url, "status_code": status, "title": title, "webserver": server,
+                                     "location": location, "content_type": ctype}) + "\n")
 
     httpx_lines.sort()
     httpx_all_txt.write_text(

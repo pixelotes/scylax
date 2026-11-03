@@ -74,7 +74,8 @@ class TestActivePhasesScope(unittest.TestCase):
     def test_phase3_httpx_targets_filtered(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             ctx = self._ctx(Path(td))
-            with mock.patch.object(active, "ev"), mock.patch.object(active, "http_get"):
+            with mock.patch.object(active, "ev"), mock.patch.object(active, "http_get"), \
+                    mock.patch.object(active, "_native_http_probe", return_value=[]):
                 active.phase3(ctx, self._dm(), Logger(ctx.run_dir / "log.txt"))
             targets = (ctx.web_dir / "httpx_targets.txt").read_text().split()
             self.assertEqual(targets, ["app.example.com"])

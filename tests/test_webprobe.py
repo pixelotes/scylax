@@ -127,6 +127,33 @@ class TestPipeline(unittest.TestCase):
             self.assertEqual(keys[f"hash-host:{HASH_A}.example.com"], "medium")
             self.assertEqual(keys[f"hash-host:{HASH_B}.example.com"], "medium")
 
+    def test_failed_httpx_falls_back_and_is_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            ctx = self._ctx(Path(td))
+            host = f"{HASH_B}.example.com"
+            (ctx.osint_dir / "ip_host.tsv").write_text(f"93.184.216.34\t{host}\n")
+            (ctx.osint_dir / "resolved.txt").write_text(f"{host}\n")
+            failed = mock.Mock(returncode=125, stdout="", stderr="Cannot connect to the Docker daemon")
+
+            def fake_get(url, **kw):
+                if url == f"https://{host}/":
+                    return resp(200, "uid,name,cluster\n", "text/plain", content_length="1566")
+                return resp(404, "", "")
+
+            dm = mock.Mock(run_dir=None)
+            dm.is_available.return_value = True
+            dm.build_cmd.side_effect = lambda n, a: [n, *a]
+            gaps = ctx.run_dir / "gaps.txt"
+            with mock.patch.object(active, "ev", return_value=failed), \
+                    mock.patch.object(active, "http_get", side_effect=fake_get), mock.patch.object(active.time, "sleep"):
+                active.phase3(ctx, dm, Logger(gaps))
+
+            self.assertIn("httpx produced no results (exit 125: Cannot connect to the Docker daemon)", gaps.read_text())
+            self.assertIn(f"https://{host} [200]", (ctx.web_dir / "httpx_all.txt").read_text())
+            self.assertIn(f"https://{host}/\ttext/plain\t1566", (ctx.web_dir / "root_data.tsv").read_text())
+            meta = json.loads((ctx.web_dir / "httpx_all.json").read_text().splitlines()[0])
+            self.assertEqual(meta["content_type"], "text/plain")
+
     def test_certspotter_fallback_records_first_seen(self) -> None:
         pages = [
             [{"id": "1", "dns_names": [f"{HASH_C}.example.com"], "not_before": "2026-04-15T00:00:00Z"},
