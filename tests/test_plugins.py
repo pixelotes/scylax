@@ -92,6 +92,43 @@ class TestPluginsSystem(unittest.TestCase):
         self.assertIn("/data/scan/pass1", cmd)
 
 
+    def test_preflight_execution(self) -> None:
+        """Verify preflight runs cleanly without raising AttributeError when optional plugins are missing."""
+        from recon.cli import preflight
+        from recon.config import RunContext, ScopeConfig
+        import tempfile
+        from recon.runner import Logger
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmppath = Path(tmpdir)
+            scope = ScopeConfig(
+                path=tmppath / "scope.toml",
+                name="test_preflight",
+                engagement="Test Preflight",
+                authorised_by="Tester",
+                authorisation_ref="REF1",
+                domains=["test.example.com"],
+            )
+            ctx = RunContext(
+                root=tmppath,
+                scope=scope,
+                run_date="2026-11-03",
+                phases=["1", "2", "3", "4", "4b", "5", "6", "7", "8", "9", "T"],
+                skip_active=False,
+                skip_cloud=True,
+                yes=True,
+            )
+            ctx.ensure_dirs()
+            dm = DependencyManager(use_docker=False, run_dir=ctx.run_dir)
+            log = Logger()
+            log.gaps_file = ctx.run_dir / "gaps.txt"
+
+            # Should not raise AttributeError: 'PluginStatus' object has no attribute 'spec'
+            preflight(ctx, dm, log)
+            self.assertTrue((ctx.run_dir / "run.meta").is_file())
+            self.assertTrue((ctx.run_dir / "tool_versions.txt").is_file())
+
+
 if __name__ == "__main__":
     unittest.main()
 

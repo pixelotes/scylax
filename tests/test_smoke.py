@@ -290,12 +290,15 @@ class TestSmokePipeline(unittest.TestCase):
         forbidden = "".join(["m", "i", "m", "a", "c", "o", "m"])
         violations: list[str] = []
 
-        ignore_dirs = {".git", ".system_generated", "__pycache__", ".pytest_cache", ".venv", "venv"}
+        ignore_dirs = {".git", ".system_generated", "__pycache__", ".pytest_cache", ".venv", "venv", "runs"}
 
         for root, dirs, files in os.walk(REPO_ROOT):
             dirs[:] = [d for d in dirs if d not in ignore_dirs]
             for fname in files:
                 fpath = Path(root) / fname
+                # Ignore user target scopes (only scopes/example.toml is repository-versioned)
+                if fpath.parent == REPO_ROOT / "scopes" and fname != "example.toml":
+                    continue
                 try:
                     content = fpath.read_text(encoding="utf-8", errors="ignore")
                     if forbidden in content.lower():
