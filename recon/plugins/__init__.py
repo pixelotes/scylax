@@ -223,6 +223,15 @@ PLUGINS: dict[str, Plugin] = {
         install_macos="export HIBP_API_KEY=your_key (https://haveibeenpwned.com/API/Key)",
         install_linux="export HIBP_API_KEY=your_key (https://haveibeenpwned.com/API/Key)",
     ),
+    "xposedornot": Plugin(
+        id="xposedornot",
+        name="XposedOrNot API",
+        kind=PluginKind.API,
+        description="Free, keyless per-account breach lookup used when no HIBP API key is set",
+        phases=("9",),
+        install_macos="No setup required (public API, about 1 request per second)",
+        install_linux="No setup required (public API, about 1 request per second)",
+    ),
 
     # ── Cloud Infrastructure CLIs ──
     "az": Plugin(

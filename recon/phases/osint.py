@@ -1059,6 +1059,80 @@ def run_email_enumeration(ctx: RunContext, dm: DependencyManager, log: Logger) -
     return sorted_emails
 
 
+_HIBP_BREACH_CACHE: dict[str, dict[str, Any] | None] = {}
+
+
+def _hibp_breach_details(name: str) -> dict[str, Any] | None:
+    """Fetch public breach metadata (DataClasses, dates) from HIBP's free catalogue."""
+    if name in _HIBP_BREACH_CACHE:
+        return _HIBP_BREACH_CACHE[name]
+    url = f"https://haveibeenpwned.com/api/v3/breach/{urllib.parse.quote(name)}"
+    status, data = http_get_json(url, headers={"User-Agent": "Scylax/1.0"}, timeout=20.0)
+    details = data if status == 200 and isinstance(data, dict) else None
+    _HIBP_BREACH_CACHE[name] = details
+    return details
+
+
+def _xposedornot_account_breaches(
+    ctx: RunContext,
+    log: Logger,
+    emails: list[str],
+) -> list[dict[str, Any]]:
+    """Check accounts with the free XposedOrNot API (no key; about 1 request per second).
+
+    XposedOrNot returns breach names only, so each name is enriched with HIBP's public
+    breach catalogue when the same breach exists there.
+    """
+    results: list[dict[str, Any]] = []
+    for em in emails:
+        time.sleep(1.1)
+        url = f"https://api.xposedornot.com/v1/check-email/{urllib.parse.quote(em)}"
+        status, data = http_get_json(url, headers={"User-Agent": "Scylax/1.0"}, timeout=20.0)
+        display_cmd = f"curl -s '{url}'"
+        if status == 404:
+            record_virtual_cmd(
+                ctx.console_dir, "9", display_cmd,
+                f"HTTP 404: No breach records for {em}",
+                title=f"XposedOrNot account breaches ({em})",
+            )
+            continue
+        if status != 200 or not isinstance(data, dict):
+            log.warn(f"XposedOrNot lookup for {em} returned HTTP {status}")
+            record_virtual_cmd(
+                ctx.console_dir, "9", display_cmd, f"HTTP {status}",
+                title=f"XposedOrNot account breaches ({em})", returncode=1,
+            )
+            continue
+        record_virtual_cmd(
+            ctx.console_dir, "9", display_cmd, json.dumps(data, indent=2),
+            title=f"XposedOrNot account breaches ({em})",
+        )
+        raw = data.get("breaches") or []
+        # The free API returns [["BreachA", "BreachB"]]; accept a flat list too.
+        names: list[str] = []
+        for item in raw:
+            if isinstance(item, list):
+                names.extend(str(x) for x in item if x)
+            elif item:
+                names.append(str(item))
+        for name in dict.fromkeys(names):
+            d = _hibp_breach_details(name) or {}
+            classes = d.get("DataClasses") or []
+            results.append(
+                {
+                    "email": em,
+                    "name": name,
+                    "title": str(d.get("Title") or name),
+                    "breach_date": str(d.get("BreachDate") or ""),
+                    "pwn_count": str(d.get("PwnCount") or "0"),
+                    "data_classes": ";".join(str(c) for c in classes) if isinstance(classes, list) else str(classes),
+                    "is_verified": str(bool(d.get("IsVerified", False))),
+                    "is_sensitive": str(bool(d.get("IsSensitive", False))),
+                }
+            )
+    return results
+
+
 def run_hibp_breaches(
     ctx: RunContext,
     log: Logger,
@@ -1066,14 +1140,14 @@ def run_hibp_breaches(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Query HaveIBeenPwned API for domain breach history and compromised corporate accounts."""
     api_key = (ctx.hibp_api_key or os.environ.get("HIBP_API_KEY", "")).strip()
-    if not api_key:
-        log.info("HIBP API key not set (set HIBP_API_KEY or --hibp-key) - skipping HIBP audit")
-        return [], []
-
     log.info("Checking HaveIBeenPwned domain & corporate account breach exposure")
     domain_breaches: list[dict[str, Any]] = []
     account_breaches: list[dict[str, Any]] = []
-    headers = {"hibp-api-key": api_key, "User-Agent": "Scylax/1.0"}
+    # The breach catalogue (/breaches?domain=, /breach/{name}) is public; only per-account lookups need a key.
+    headers = {"User-Agent": "Scylax/1.0"}
+    if api_key:
+        headers["hibp-api-key"] = api_key
+    key_hdr = " -H 'hibp-api-key: [REDACTED]'" if api_key else ""
 
     # 1. Domain breaches
     for i, d in enumerate(ctx.scope.domains):
@@ -1082,7 +1156,7 @@ def run_hibp_breaches(
         url = f"https://haveibeenpwned.com/api/v3/breaches?domain={urllib.parse.quote(d)}"
         status, data = http_get_json(url, headers=headers, timeout=20.0)
 
-        display_cmd = f"curl -s -H 'hibp-api-key: [REDACTED]' '{url}'"
+        display_cmd = f"curl -s{key_hdr} '{url}'"
         if status == 200 and isinstance(data, list):
             record_virtual_cmd(
                 ctx.console_dir,
@@ -1150,60 +1224,68 @@ def run_hibp_breaches(
             else []
         )
 
-    for em in target_emails[:50]:
-        time.sleep(1.6)  # HIBP enforces 1 request per 1.5s rate limit
-        url = f"https://haveibeenpwned.com/api/v3/breachedaccount/{urllib.parse.quote(em)}?truncateResponse=false"
-        status, data = http_get_json(url, headers=headers, timeout=20.0)
-        display_cmd = f"curl -s -H 'hibp-api-key: [REDACTED]' '{url}'"
+    if api_key:
+        log.info(f"Checking {min(len(target_emails), 50)} corporate account(s) against HaveIBeenPwned")
+        for em in target_emails[:50]:
+            time.sleep(1.6)  # HIBP enforces 1 request per 1.5s rate limit
+            url = f"https://haveibeenpwned.com/api/v3/breachedaccount/{urllib.parse.quote(em)}?truncateResponse=false"
+            status, data = http_get_json(url, headers=headers, timeout=20.0)
+            display_cmd = f"curl -s{key_hdr} '{url}'"
 
-        if status == 200 and isinstance(data, list):
-            record_virtual_cmd(
-                ctx.console_dir,
-                "9",
-                display_cmd,
-                json.dumps(data, indent=2),
-                title=f"HIBP account breaches ({em})",
-            )
-            raw_acc_path = ctx.osint_dir / f"hibp_account_{re.sub(r'[^a-zA-Z0-9_.-]', '_', em)}.json"
-            raw_acc_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-            for b in data:
-                if isinstance(b, dict):
-                    data_classes = b.get("DataClasses") or []
-                    dc_str = (
-                        ";".join(str(c) for c in data_classes)
-                        if isinstance(data_classes, list)
-                        else str(data_classes)
-                    )
-                    account_breaches.append(
-                        {
-                            "email": em,
-                            "name": str(b.get("Name") or ""),
-                            "title": str(b.get("Title") or b.get("Name") or ""),
-                            "breach_date": str(b.get("BreachDate") or ""),
-                            "pwn_count": str(b.get("PwnCount") or "0"),
-                            "data_classes": dc_str,
-                            "is_verified": str(bool(b.get("IsVerified", False))),
-                            "is_sensitive": str(bool(b.get("IsSensitive", False))),
-                        }
-                    )
-        elif status == 404:
-            record_virtual_cmd(
-                ctx.console_dir,
-                "9",
-                display_cmd,
-                f"HTTP 404: No breach records for {em}",
-                title=f"HIBP account breaches ({em})",
-            )
-        else:
-            log.warn(f"HIBP account lookup for {em} returned HTTP {status}")
-            record_virtual_cmd(
-                ctx.console_dir,
-                "9",
-                display_cmd,
-                f"HTTP {status}",
-                title=f"HIBP account breaches ({em})",
-                returncode=1,
-            )
+            if status == 200 and isinstance(data, list):
+                record_virtual_cmd(
+                    ctx.console_dir,
+                    "9",
+                    display_cmd,
+                    json.dumps(data, indent=2),
+                    title=f"HIBP account breaches ({em})",
+                )
+                raw_acc_path = ctx.osint_dir / f"hibp_account_{re.sub(r'[^a-zA-Z0-9_.-]', '_', em)}.json"
+                raw_acc_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                for b in data:
+                    if isinstance(b, dict):
+                        data_classes = b.get("DataClasses") or []
+                        dc_str = (
+                            ";".join(str(c) for c in data_classes)
+                            if isinstance(data_classes, list)
+                            else str(data_classes)
+                        )
+                        account_breaches.append(
+                            {
+                                "email": em,
+                                "name": str(b.get("Name") or ""),
+                                "title": str(b.get("Title") or b.get("Name") or ""),
+                                "breach_date": str(b.get("BreachDate") or ""),
+                                "pwn_count": str(b.get("PwnCount") or "0"),
+                                "data_classes": dc_str,
+                                "is_verified": str(bool(b.get("IsVerified", False))),
+                                "is_sensitive": str(bool(b.get("IsSensitive", False))),
+                            }
+                        )
+            elif status == 404:
+                record_virtual_cmd(
+                    ctx.console_dir,
+                    "9",
+                    display_cmd,
+                    f"HTTP 404: No breach records for {em}",
+                    title=f"HIBP account breaches ({em})",
+                )
+            else:
+                log.warn(f"HIBP account lookup for {em} returned HTTP {status}")
+                record_virtual_cmd(
+                    ctx.console_dir,
+                    "9",
+                    display_cmd,
+                    f"HTTP {status}",
+                    title=f"HIBP account breaches ({em})",
+                    returncode=1,
+                )
+
+    elif target_emails:
+        log.info(
+            "HIBP API key not set - checking corporate accounts against the free XposedOrNot API instead"
+        )
+        account_breaches.extend(_xposedornot_account_breaches(ctx, log, target_emails[:50]))
 
     acc_tsv_path = ctx.osint_dir / "hibp_account_breaches.tsv"
     acc_tsv_lines = ["email\tname\ttitle\tbreach_date\tpwn_count\tdata_classes\tis_verified\tis_sensitive\n"]

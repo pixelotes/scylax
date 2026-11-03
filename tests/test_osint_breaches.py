@@ -45,13 +45,32 @@ domains = ["contoso.com"]
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
-    def test_hibp_skipped_when_no_api_key(self) -> None:
+    @patch("recon.phases.osint.time.sleep")
+    @patch("recon.phases.osint.http_get_json")
+    def test_no_api_key_uses_public_catalogue_and_xposedornot(
+        self, mock_http: MagicMock, _sleep: MagicMock
+    ) -> None:
         self.ctx.hibp_api_key = ""
+
+        def fake(url, headers=None, timeout=0):
+            self.assertNotIn("hibp-api-key", headers or {})
+            if "breaches?domain=" in url:
+                return 200, [{"Name": "ContosoLeak", "Title": "Contoso Leak", "BreachDate": "2023-04-18",
+                              "PwnCount": 10, "DataClasses": ["Email addresses"]}]
+            if "xposedornot" in url:
+                return 200, {"breaches": [["ContosoLeak"]]}
+            if url.endswith("/breach/ContosoLeak"):
+                return 200, {"Title": "Contoso Leak", "BreachDate": "2023-04-18", "PwnCount": 10,
+                             "DataClasses": ["Email addresses", "Passwords"]}
+            return 404, None
+
+        mock_http.side_effect = fake
         with patch.dict("os.environ", {}, clear=True):
-            dom_b, acc_b = run_hibp_breaches(self.ctx, self.log)
-            self.assertEqual(dom_b, [])
-            self.assertEqual(acc_b, [])
-            self.assertFalse((self.ctx.osint_dir / "hibp_breaches.tsv").exists())
+            dom_b, acc_b = run_hibp_breaches(self.ctx, self.log, emails=["jdoe@contoso.com"])
+        self.assertEqual(len(dom_b), 1)
+        self.assertEqual(len(acc_b), 1)
+        self.assertIn("Passwords", acc_b[0]["data_classes"])
+        self.assertFalse(any("breachedaccount" in c.args[0] for c in mock_http.call_args_list))
 
     @patch("recon.phases.osint.http_get_json")
     def test_hibp_successful_breaches_found(self, mock_http: MagicMock) -> None:
