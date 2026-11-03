@@ -1,0 +1,147 @@
+# Example scope configuration for the recon pipeline.
+# Modeled after the Contoso Ltd. & Northwind Traders multi-domain demonstration environment.
+# Copy to scopes/<name>.toml and adjust settings for your organization.
+# The filename without extension becomes the scope name (runs/<name>/<date>/).
+# Real scope files are git-ignored because they contain sensitive target and authorization info.
+
+[engagement]
+engagement = "Contoso Ltd. & Northwind Traders — H2 External Attack Surface Assessment"
+scope_owner = "Sarah Jenkins, VP of Information Security (Contoso Ltd.)"
+
+# Authorization is mandatory for active phases (e.g. 3, 4, 4b, 5, 8, A, G, W).
+authorised_by = "Sarah Jenkins, VP of Information Security (Contoso Ltd.) - 2026-11-01"
+authorisation_ref = "SEC-2026-8841"
+
+[targets]
+# Required: Root domains owned by the organization.
+domains = ["contoso.com", "northwindtraders.com", "fabrikam.io"]
+
+# Main website URL for security headers analysis (default: https://www.<first_domain>/).
+www_url = "https://www.contoso.com/"
+
+# Automatically discover and add in-scope targets during passive enumeration.
+auto_discover_targets = true
+
+# High-Value Target (HVT) IPs: full TCP port scan, service fingerprint, and nuclei scans.
+hvt_ips = [
+    "198.51.100.10",   # erp-lb.contoso.com (Azure East US)
+    "198.51.100.12",   # mail-relay.contoso.com (Exchange Hybrid)
+    "198.51.100.15",   # vpn-gw.contoso.com (S2S VPN Gateway)
+    "198.51.100.52",   # vm-erp-legacy.contoso.com (Legacy Windows Terminal Server)
+    "203.0.113.19",    # ec2-legacy-app.aws.com (Staging API Gateway)
+]
+
+# Fragile edge devices (office routers, branch firewalls, IoT): light port scan only, no nuclei.
+edge_ips = [
+    "198.51.100.90",   # edge-fw01.contoso.com (OPNsense perimeter appliance)
+    "203.0.113.45",    # branch-gw45.northwind.net (MikroTik RouterOS edge gateway)
+]
+edge_ports = "21,22,23,53,80,443,8291"
+
+# IPs strictly excluded from active scanning (third-party hosts, shared PaaS, customer endpoints).
+exclude_ips = []
+
+# Organizations trusted to host apex domains (avoids flagging known CDN/SaaS providers as rogue apexes).
+apex_trusted_orgs = ["HubSpot", "Cloudflare", "Microsoft Corporation", "Amazon"]
+
+# Organizations/CDNs to skip aggressive port scans for (shared edge / WAF).
+skip_portscan_orgs = [
+    "Cloudflare",
+    "Fastly",
+    "Akamai",
+    "Amazon CloudFront",
+    "HubSpot",
+    "GitHub",
+    "Vercel",
+    "Netlify",
+    "Squarespace",
+    "Wix",
+]
+
+[azure]
+# Phase A (grey-box Azure assessment).
+# Subscriptions to query via Azure Resource Graph (leave empty for all subscriptions in the active tenant).
+azure_subscriptions = [
+    "sub-contoso-production-01",
+    "sub-contoso-security-01",
+    "sub-northwind-analytics-01",
+]
+# Optional static inventory file: one IP per line (optional TAB + asset name).
+azure_inventory_file = ""
+
+[gcp]
+# Phase G (grey-box GCP assessment).
+# GCP project IDs to query for external IPs, forwarding rules, and VPC firewalls.
+gcp_projects = [
+    "contoso-ecommerce-prod",
+    "contoso-analytics-prod",
+    "contoso-microservices-prod",
+]
+# Optional static inventory file: one IP per line (optional TAB + asset name).
+gcp_inventory_file = ""
+
+[aws]
+# Phase W (grey-box AWS assessment).
+# AWS CLI profile names and regions to query for Elastic IPs, ALBs, RDS, and Security Groups.
+aws_profiles = ["contoso-security"]
+aws_regions = ["us-east-1", "eu-west-1"]
+# Optional static inventory file: one IP per line (optional TAB + asset name).
+aws_inventory_file = ""
+
+[cloud_posture]
+# Cloud Security Posture checks during cloud phases (A: Azure, G: GCP, W: AWS).
+# Runs fast native CLI posture checks (Storage public access/encryption, KeyVault purge protection,
+# SQL public access, Defender for Cloud tiers, IAM/MFA, VPC firewalls).
+cloud_posture = true
+
+# Optional deep CSPM scan using Prowler (CIS benchmarks). Requires 'cloud_posture = true'.
+use_prowler = false
+
+[intelligence]
+# Optional threat intelligence and breach audit API keys (or export SHODAN_API_KEY / HIBP_API_KEY).
+# Shodan: host history & open port lookups (Phase 7). Free public CVEDB lookup runs automatically without a key.
+shodan_api_key = ""
+
+# HaveIBeenPwned: enterprise domain breach and leaked account exposure audit (Phase 9).
+hibp_api_key = ""
+
+[saas]
+# Phase S: SaaS Security Posture checks (Microsoft 365 / Entra ID, GitHub, Google Workspace).
+# This phase performs authenticated, read-only configuration audits of the organization's own SaaS tenants,
+# separate from the unauthenticated external reconnaissance pipeline.
+saas_posture = true
+providers = ["m365", "github", "google"]
+
+# Microsoft 365 / Entra ID requirements:
+# Environment variables: M365_TENANT_ID, M365_CLIENT_ID, M365_CLIENT_SECRET
+# Minimum permissions: Azure AD App Registration with Application permissions:
+#   User.Read.All, Directory.Read.All, Policy.Read.All, AuditLog.Read.All,
+#   Application.Read.All, Reports.Read.All, UserAuthenticationMethod.Read.All,
+#   Organization.Read.All, IdentityRiskyUser.Read.All, IdentityRiskEvent.Read.All
+#   (Admin consent granted).
+
+# GitHub requirements:
+# Environment variable: GITHUB_ORG
+# CLI & auth: GitHub CLI (`gh`) authenticated as organization owner:
+#   gh auth refresh --scopes admin:org,audit_log
+
+# Google Workspace requirements:
+# CLI & auth: Google Apps Manager (`gam` CLI or GAM_PATH env var) authenticated as super admin:
+#   gam info domain
+
+[limits]
+# Scan rate limits (keep conservative on production networks).
+nmap_max_rate = 400           # packets/sec for HVT and cloud scans
+edge_max_rate = 40            # packets/sec for fragile edge fingerprinting
+nuclei_rate = 50              # requests/sec
+httpx_rate = 50               # requests/sec
+
+# Amass enumeration settings.
+use_amass = true
+amass_timeout_min = 10
+
+[thresholds]
+# Minimum supported software versions for triage flags. Update per assessment cycle.
+min_apache = "2.4.65"
+min_nginx = "1.26.0"
+min_routeros = "7.15"
