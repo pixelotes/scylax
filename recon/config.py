@@ -41,6 +41,9 @@ DEFAULT_SKIP_PORTSCAN_ORGS: List[str] = [
     "Fastly",
     "Akamai",
     "Amazon CloudFront",
+    r"cloudfront\.net",
+    "AMAZON-CF",
+    "akamaitechnologies",
     "HubSpot",
     "GitHub",
     "Vercel",
@@ -66,18 +69,7 @@ class ScopeConfig:
     exclude_ips: List[str] = field(default_factory=list)
     auto_discover_targets: bool = True
     skip_portscan_orgs: List[str] = field(
-        default_factory=lambda: [
-            "Cloudflare",
-            "Fastly",
-            "Akamai",
-            "Amazon CloudFront",
-            "HubSpot",
-            "GitHub",
-            "Vercel",
-            "Netlify",
-            "Squarespace",
-            "Wix",
-        ]
+        default_factory=lambda: list(DEFAULT_SKIP_PORTSCAN_ORGS)
     )
     apex_trusted_orgs: List[str] = field(default_factory=list)
     azure_subscriptions: List[str] = field(default_factory=list)

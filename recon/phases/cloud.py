@@ -14,6 +14,7 @@ from typing import Any, List, Set, Tuple
 from recon.config import RunContext
 from recon.deps import DependencyManager
 from recon.runner import Logger, ev, record_virtual_cmd, run_cmd
+from recon.scope import ip_in, is_public_ip, parse_networks
 
 __all__ = [
     "phaseA",
@@ -1066,11 +1067,11 @@ def _scan_cloud_ips(
 
     n = len(raw_ips)
 
-    exclude_set: set[str] = set(ctx.scope.exclude_ips) | set(ctx.scope.edge_ips)
+    blocked = parse_networks(list(ctx.scope.exclude_ips) + list(ctx.scope.edge_ips))
     target_ips: list[str] = []
     seen_targets: set[str] = set()
     for ip in raw_ips:
-        if ip not in exclude_set and ip not in seen_targets:
+        if is_public_ip(ip) and not ip_in(ip, blocked) and ip not in seen_targets:
             seen_targets.add(ip)
             target_ips.append(ip)
 

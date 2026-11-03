@@ -12,6 +12,7 @@ from pathlib import Path
 from recon.config import RunContext
 from recon.deps import DependencyManager
 from recon.runner import Logger, ev, http_get, record_virtual_cmd, run_cmd
+from recon.scope import guard_for, ip_in, is_public_ip, parse_networks
 
 
 WELL_KNOWN_PATHS: list[tuple[str, str, str]] = [
@@ -45,11 +46,18 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
             for line in resolved_file.read_text(encoding="utf-8", errors="replace").splitlines()
             if line.strip() and not line.strip().startswith("#")
         ]
+    guard = guard_for(ctx)
+    skipped = [h for h in hosts if not guard.host_allowed(h)]
+    hosts = [h for h in hosts if guard.host_allowed(h)]
+    if skipped:
+        log.info(f"Phase 3: {len(skipped)} hostnames skipped (excluded/edge/non-public IPs)")
+    httpx_targets = ctx.web_dir / "httpx_targets.txt"
+    httpx_targets.write_text("".join(f"{h}\n" for h in hosts), encoding="utf-8")
 
     httpx_all_txt = ctx.web_dir / "httpx_all.txt"
     httpx_lines: list[str] = []
 
-    if dm.is_available("httpx"):
+    if dm.is_available("httpx") and hosts:
         httpx_json = ctx.web_dir / "httpx_all.json"
         ev(
             ctx.console_dir,
@@ -58,7 +66,7 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 "httpx",
                 [
                     "-l",
-                    str(resolved_file),
+                    str(httpx_targets),
                     "-sc",
                     "-title",
                     "-server",
@@ -91,12 +99,14 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                     except json.JSONDecodeError:
                         continue
                     url = str(item.get("url") or "")
+                    if not guard.url_allowed(url):
+                        continue
                     status_code = str(item.get("status_code") or item.get("status-code") or "")
                     title = str(item.get("title") or "").replace("\r", " ").replace("\n", " ")
                     webserver = str(item.get("webserver") or "")
                     location = str(item.get("location") or "")
                     httpx_lines.append(f"{url} [{status_code}] [{title}] [{webserver}] [{location}]")
-    else:
+    elif hosts:
         log.warn("httpx missing - using native Python HTTPS/HTTP probe (slower, no tech-detect)")
         for h in hosts:
             for scheme in ("https", "http"):
@@ -167,7 +177,6 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     # Non-intrusive Well-Known Paths & API Surface Check (ctx.web_dir / "exposed_paths.tsv")
     live_base_urls: list[str] = []
     seen_bases: set[str] = set()
-    exclude_set = set(ctx.scope.edge_ips) | set(ctx.scope.exclude_ips)
 
     for line in httpx_lines:
         parts = line.split()
@@ -180,10 +189,9 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         code = int(m.group(1))
         if code not in (200, 301, 302, 401, 403):
             continue
-        parsed = urllib.parse.urlparse(u)
-        host = parsed.hostname or ""
-        if host in exclude_set or any(ex in host for ex in exclude_set if ex):
+        if not guard.url_allowed(u):
             continue
+        parsed = urllib.parse.urlparse(u)
         scheme = parsed.scheme or "http"
         base = f"{scheme}://{parsed.netloc}".rstrip("/")
         if base and base not in seen_bases:
@@ -281,28 +289,28 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     if dm.run_dir is None:
         dm.run_dir = ctx.run_dir
 
-    raw_ips: list[str] = list(ctx.scope.hvt_ips)
+    # hvt_ips are declared explicitly in scope; discovered IPs come from public DNS
+    # and must be globally routable (never RFC1918, CGNAT, link-local/metadata).
+    raw_ips: list[tuple[str, bool]] = [(ip, True) for ip in ctx.scope.hvt_ips]
     if ctx.scope.auto_discover_targets:
         disc_file = ctx.osint_dir / "discovered_targets.txt"
         if disc_file.is_file():
             for line in disc_file.read_text(encoding="utf-8", errors="replace").splitlines():
                 ip_str = line.strip()
                 if ip_str and not ip_str.startswith("#"):
-                    raw_ips.append(ip_str)
+                    raw_ips.append((ip_str, False))
 
-    exclude_ips = set(ctx.scope.exclude_ips) | set(ctx.scope.edge_ips)
+    blocked = parse_networks(list(ctx.scope.exclude_ips) + list(ctx.scope.edge_ips))
     target_ips: list[str] = []
     seen_ips: set[str] = set()
-    for ip in raw_ips:
-        if (
-            ip not in seen_ips
-            and ip not in exclude_ips
-            and not ip.startswith("127.")
-            and ip != "::1"
-            and ip != "0.0.0.0"
-        ):
-            seen_ips.add(ip)
-            target_ips.append(ip)
+    for ip, declared in raw_ips:
+        if ip in seen_ips or ip_in(ip, blocked):
+            continue
+        if not declared and not is_public_ip(ip):
+            log.warn(f"Phase 4: skipping non-public discovered IP {ip}")
+            continue
+        seen_ips.add(ip)
+        target_ips.append(ip)
 
     if not dm.is_available("nmap"):
         log.warn("nmap not available - phase 4 skipped")
@@ -516,6 +524,7 @@ def phase5(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
     httpx_txt = ctx.web_dir / "httpx_all.txt"
     whatweb_targets = ctx.web_dir / "whatweb_targets.txt"
+    guard = guard_for(ctx)
     urls: list[str] = []
     seen_urls: set[str] = set()
     if httpx_txt.is_file():
@@ -524,7 +533,7 @@ def phase5(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 parts = line.split()
                 if parts:
                     u = parts[0]
-                    if u not in seen_urls:
+                    if u not in seen_urls and guard.url_allowed(u):
                         seen_urls.add(u)
                         urls.append(u)
 
@@ -583,11 +592,17 @@ def phase8(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 if code in (200, 301, 302, 307, 308, 401, 403):
                     targets.append(url_str)
 
-    forbidden_ips = set(ctx.scope.edge_ips) | set(ctx.scope.exclude_ips)
+    guard = guard_for(ctx)
+    blocked = parse_networks(list(ctx.scope.exclude_ips) + list(ctx.scope.edge_ips))
+    hvt_set = set(ctx.scope.hvt_ips)
     filtered_targets: list[str] = []
     seen: set[str] = set()
     for t in targets:
-        if any(bad_ip in t for bad_ip in forbidden_ips if bad_ip):
+        host = urllib.parse.urlparse(t if "://" in t else f"https://{t}").hostname or ""
+        if host in hvt_set:
+            if ip_in(host, blocked):
+                continue
+        elif not guard.url_allowed(t):
             continue
         if t not in seen:
             seen.add(t)

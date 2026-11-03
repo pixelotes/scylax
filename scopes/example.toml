@@ -50,6 +50,9 @@ skip_portscan_orgs = [
     "Fastly",
     "Akamai",
     "Amazon CloudFront",
+    'cloudfront\.net',  # PTR of CloudFront edges
+    "AMAZON-CF",
+    "akamaitechnologies",
     "HubSpot",
     "GitHub",
     "Vercel",

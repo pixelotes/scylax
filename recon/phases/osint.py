@@ -34,6 +34,7 @@ from recon.runner import (
     record_virtual_cmd,
     run_cmd,
 )
+from recon.scope import ScopeGuard
 
 
 def phase1(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
@@ -335,29 +336,32 @@ def phase2(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     skip_re = None
     if ctx.scope.skip_portscan_orgs_regex and ctx.scope.skip_portscan_orgs_regex != r"^$":
         skip_re = re.compile(ctx.scope.skip_portscan_orgs_regex, re.IGNORECASE)
+    guard = ScopeGuard(list(ctx.scope.exclude_ips) + list(ctx.scope.edge_ips), {})
 
     for ip in sorted(ip_to_hosts.keys()):
         hosts = ip_to_hosts[ip]
         ptr_res = run_cmd(dm.build_cmd("dig", ["+short", "-x", ip]), timeout=10)
         ptr = ptr_res.stdout.splitlines()[0].strip() if ptr_res.stdout.splitlines() else ""
 
-        org = ""
+        # Collect every org/netname/descr line: ARIN lists NetName before OrgName,
+        # so the first match alone misses providers such as Fastly or CloudFront.
+        orgs: list[str] = []
         if dm.is_available("whois"):
             whois_res = run_cmd(dm.build_cmd("whois", [ip]), timeout=15)
             for line in whois_res.combined.splitlines():
-                m = re.match(r"(?i)^(?:org-name|orgname|netname|descr):\s*(.+)$", line.strip())
-                if m:
-                    org = m.group(1).strip()
-                    break
+                m = re.match(r"(?i)^(?:org-name|orgname|org|netname|descr|owner):\s*(.+)$", line.strip())
+                if m and m.group(1).strip() not in orgs:
+                    orgs.append(m.group(1).strip())
+        org = orgs[0] if orgs else ""
 
         hosts_sample = ",".join(hosts[:5])
         ip_orgs_lines.append(f"{ip}\t{org}\t{ptr}\t{hosts_sample}\n")
 
         if ctx.scope.auto_discover_targets:
-            if ip in ctx.scope.edge_ips or ip in ctx.scope.exclude_ips:
+            if not guard.ip_allowed(ip):
                 continue
             if skip_re is not None:
-                if (org and skip_re.search(org)) or (ptr and skip_re.search(ptr)):
+                if any(skip_re.search(o) for o in orgs) or (ptr and skip_re.search(ptr)):
                     continue
             discovered_targets.append(ip)
 
