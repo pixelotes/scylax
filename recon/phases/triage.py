@@ -881,6 +881,8 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         "info": 4,
     }
 
+    candidates[:] = _fold_per_host(candidates, SEVERITY_ORDER)
+
     seen_candidates: set[tuple[str, str, str, str]] = set()
     deduped: list[tuple[str, str, str, str]] = []
     for sev, key, title, ev in candidates:
@@ -1061,3 +1063,40 @@ def _update_history(ctx: RunContext, curr_map: dict[str, tuple[str, str, str, st
     except OSError:
         pass
     return history
+
+
+# Web findings about the same host are folded into its most severe one, so a
+# single exposed service shows up once (with the rest as supporting evidence)
+# instead of as a directory listing + data file + API docs + hashed name.
+_HOST_FOLD_PREFIXES = ("api-data:", "data-export:", "exposed-path:", "dirlist:", "exposed-api:", "hash-host:")
+
+
+def _fold_host(key: str) -> str | None:
+    for prefix in _HOST_FOLD_PREFIXES:
+        if key.startswith(prefix):
+            rest = key[len(prefix):]
+            return (urllib.parse.urlparse(rest).hostname or "") if "://" in rest else rest.split("/")[0]
+    return None
+
+
+def _fold_per_host(
+    candidates: list[tuple[str, str, str, str]], severity_order: dict[str, int]
+) -> list[tuple[str, str, str, str]]:
+    groups: dict[str, list[int]] = {}
+    for i, (_, key, _, _) in enumerate(candidates):
+        host = _fold_host(key)
+        if host:
+            groups.setdefault(host, []).append(i)
+    drop: set[int] = set()
+    out = list(candidates)
+    for idxs in groups.values():
+        if len(idxs) < 2:
+            continue
+        rank = lambda i: (severity_order.get(candidates[i][0], 99),
+                          [k for k in range(len(_HOST_FOLD_PREFIXES)) if candidates[i][1].startswith(_HOST_FOLD_PREFIXES[k])][0])
+        main, *rest = sorted(idxs, key=rank)
+        sev, key, title, evidence = candidates[main]
+        extra = "; ".join(f"{candidates[i][2]}: {candidates[i][3]}" for i in rest)
+        out[main] = (sev, key, title, f"{evidence} | also: {extra}")
+        drop.update(rest)
+    return [c for i, c in enumerate(out) if i not in drop]

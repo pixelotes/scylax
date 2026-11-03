@@ -121,11 +121,13 @@ class TestPipeline(unittest.TestCase):
 
             phaseT(ctx, DependencyManager(use_docker=False, run_dir=ctx.run_dir), Logger())
             rows = [l.split("\t") for l in (ctx.run_dir / "findings_auto.tsv").read_text().splitlines()]
-            keys = {r[1]: r[0] for r in rows}
-            self.assertEqual(keys[f"api-data:{HASH_A}.example.com"], "critical")
-            self.assertEqual(keys[f"data-export:{HASH_B}.example.com"], "high")
-            self.assertEqual(keys[f"hash-host:{HASH_A}.example.com"], "medium")
-            self.assertEqual(keys[f"hash-host:{HASH_B}.example.com"], "medium")
+            keys = {r[1]: r for r in rows}
+            self.assertEqual(keys[f"api-data:{HASH_A}.example.com"][0], "critical")
+            self.assertEqual(keys[f"data-export:{HASH_B}.example.com"][0], "high")
+            # One finding per host: the hashed-name and API-schema findings are folded in as evidence
+            self.assertFalse(any(k.startswith("hash-host:") or k.startswith("exposed-api:") for k in keys))
+            self.assertIn("unguessable hostname", keys[f"api-data:{HASH_A}.example.com"][3])
+            self.assertIn("unguessable hostname", keys[f"data-export:{HASH_B}.example.com"][3])
 
     def test_failed_httpx_falls_back_and_is_reported(self) -> None:
         with tempfile.TemporaryDirectory() as td:

@@ -36,6 +36,7 @@ from recon.runner import (
 )
 from recon.nvd import cpe_to_23, load_kev_ids, nvd_cves_for_cpe
 from recon.scope import ScopeGuard
+from recon.webprobe import is_hash_label
 
 
 def phase1(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
@@ -149,6 +150,22 @@ def phase1(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         counts_lines.append(f"{d} {c}\n")
 
     (ctx.osint_dir / "subdomain_counts.txt").write_text("".join(counts_lines), encoding="utf-8")
+    # Wildcard CT queries are truncated on large domains; look up hash-like
+    # hostnames (the "unguessable URL" pattern) one by one so they get a date.
+    missing = [h for h in subdomains if is_hash_label(h) and h not in ct_first_seen][:60]
+    for h in missing:
+        st, data = http_get_json(f"https://crt.sh/?q={urllib.parse.quote(h)}&output=json", timeout=60)
+        if st == 200 and isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict):
+                    for name_line in str(item.get("name_value", "")).splitlines():
+                        _ct_note(name_line, item.get("not_before", ""))
+        time.sleep(1.0)
+    if missing:
+        record_virtual_cmd(
+            ctx.console_dir, "1", f"crt.sh exact lookups for {len(missing)} hash-like hostnames",
+            f"{sum(1 for h in missing if h in ct_first_seen)} dated", title="crt.sh (hash-like hosts)",
+        )
     (ctx.osint_dir / "ct_first_seen.tsv").write_text(
         "".join(f"{h}\t{ct_first_seen[h]}\n" for h in sorted(ct_first_seen) if pattern.search(h)),
         encoding="utf-8",
