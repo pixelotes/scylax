@@ -1,4 +1,4 @@
-# Scylax, a Digital Attack Surface Cartography tool.
+# Scylax — Digital Attack Surface Cartography tool
 
 ```text
    ███████╗ ██████╗██╗   ██╗██╗      █████╗ ██╗  ██╗
@@ -307,7 +307,9 @@ Key settings in `scopes/example.toml`:
 | `--prowler` | Enable deep Prowler CSPM assessment during cloud posture checks (or `USE_PROWLER=1`) |
 | `--shodan-key KEY` | Shodan API key for phase 7 host lookups (or `SHODAN_API_KEY`) |
 | `--hibp-key KEY` | HaveIBeenPwned API key for domain/account breach audit (or `HIBP_API_KEY`) |
-| `-y`, `--yes` | Skip interactive confirmation prompt before active phases |
+| `-y`, `--yes` | Skip interactive confirmation prompt before active phases (or `YES=1`) |
+| `--authorised-by NAME` | Written authorisation name/role for active phases (or `AUTHORISED_BY`) |
+| `--authorisation-ref REF` | Written authorisation ticket/ref for active phases (or `AUTHORISATION_REF`) |
 | `-D`, `--docker` | Run supported tools via Docker containers instead of native binaries |
 | `--check-deps` | Print dependency status table and exit |
 | `--report-only DIR` | Regenerate `report.md` and `report.html` for an existing run folder |
