@@ -307,6 +307,8 @@ Key settings in `scopes/example.toml`:
 | `--prowler` | Enable deep Prowler CSPM assessment during cloud posture checks (or `USE_PROWLER=1`) |
 | `--shodan-key KEY` | Shodan API key for phase 7 host lookups (or `SHODAN_API_KEY`) |
 | `--hibp-key KEY` | HaveIBeenPwned API key for domain/account breach audit (or `HIBP_API_KEY`) |
+| `-q`, `--quick` | Quick port scan: scans top 1,000 ports instead of all 65,535 in Phase 4 (or `QUICK=1`) |
+| `--top-ports N` | Specific number of top ports to scan with Nmap (e.g. `100`, `1000`) |
 | `-y`, `--yes` | Skip interactive confirmation prompt before active phases (or `YES=1`) |
 | `--authorised-by NAME` | Written authorisation name/role for active phases (or `AUTHORISED_BY`) |
 | `--authorisation-ref REF` | Written authorisation ticket/ref for active phases (or `AUTHORISATION_REF`) |
