@@ -2450,8 +2450,8 @@ def generate_html(data: RunData) -> str:
               <div class="terminal-right">
                 <span class="badge {'badge-auth' if c.get('returncode', 0) == 0 else 'badge-critical'}">exit {c.get('returncode', 0)}</span>
                 {f"<span class='badge badge-info'>{c['duration_ms'] / 1000.0:.1f}s</span>" if c.get('duration_ms', 0) >= 1000 else (f"<span class='badge badge-info'>{c['duration_ms']}ms</span>" if c.get('duration_ms') else "")}
-                <button class="btn-terminal" onclick="copySnippet(this, {json.dumps(c.get('cmd', ''))})">Copy Command</button>
-                <button class="btn-terminal" onclick="copySnippet(this, {json.dumps(c.get('output', ''))})">Copy Output</button>
+                <button class="btn-terminal" onclick="copyTerminalCmd(this)">Copy Command</button>
+                <button class="btn-terminal" onclick="copyTerminalOut(this)">Copy Output</button>
               </div>
             </div>
             <div class="terminal-body">
@@ -2655,8 +2655,8 @@ def generate_html(data: RunData) -> str:
     saasSearch.addEventListener('input', filterSaas);
   }}
 
-  // Copy to Clipboard Helper
-  function copySnippet(btn, text) {{
+  // Copy to Clipboard Helpers
+  function copyTextToClipboard(btn, text) {{
     if (!navigator.clipboard) {{
       const ta = document.createElement('textarea');
       ta.value = text;
@@ -2672,6 +2672,24 @@ def generate_html(data: RunData) -> str:
     }}).catch(() => {{
       showCopied(btn);
     }});
+  }}
+
+  function copyTerminalCmd(btn) {{
+    const term = btn.closest('.terminal-window');
+    if (!term) return;
+    const cmdEl = term.querySelector('.terminal-cmd');
+    if (cmdEl) copyTextToClipboard(btn, cmdEl.innerText || cmdEl.textContent || '');
+  }}
+
+  function copyTerminalOut(btn) {{
+    const term = btn.closest('.terminal-window');
+    if (!term) return;
+    const outEl = term.querySelector('.terminal-out');
+    if (outEl) copyTextToClipboard(btn, outEl.innerText || outEl.textContent || '');
+  }}
+
+  function copySnippet(btn, text) {{
+    copyTextToClipboard(btn, text);
   }}
 
   function showCopied(btn) {{
