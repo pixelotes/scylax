@@ -99,6 +99,8 @@ class ScopeConfig:
     httpx_rate: int = 50
     use_amass: bool = True
     amass_timeout_min: int = 10
+    quick_scan: bool = False
+    top_ports: int | None = None
     min_apache: str = "2.4.65"
     min_nginx: str = "1.26.0"
     min_routeros: str = "7.15"
@@ -314,6 +316,8 @@ class ScopeConfig:
             httpx_rate=int(flat.get("httpx_rate", 50)),
             use_amass=use_amass,
             amass_timeout_min=int(flat.get("amass_timeout_min", 10)),
+            quick_scan=bool(flat.get("quick_scan", False) or flat.get("quick", False)),
+            top_ports=int(flat["top_ports"]) if flat.get("top_ports") else None,
             min_apache=str(flat.get("min_apache", "2.4.65")),
             min_nginx=str(flat.get("min_nginx", "1.26.0")),
             min_routeros=str(flat.get("min_routeros", "7.15")),
@@ -336,10 +340,16 @@ class RunContext:
     cloud_posture: bool = False
     use_prowler: bool = False
     saas_posture: bool = False
+    quick_scan: bool = False
+    top_ports: int | None = None
 
     def __post_init__(self) -> None:
         if self.skip_cloud:
             self.skip_azure = True
+        if not self.quick_scan and getattr(self.scope, "quick_scan", False):
+            self.quick_scan = True
+        if self.top_ports is None and getattr(self.scope, "top_ports", None) is not None:
+            self.top_ports = self.scope.top_ports
         if not self.cloud_posture and getattr(self.scope, "cloud_posture", False):
             self.cloud_posture = self.scope.cloud_posture
         if not self.use_prowler and getattr(self.scope, "use_prowler", False):

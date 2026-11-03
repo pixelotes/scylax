@@ -124,6 +124,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="enable deep Prowler CSPM assessment during cloud posture checks (or USE_PROWLER=1)",
     )
     parser.add_argument(
+        "-q",
+        "--quick",
+        action="store_true",
+        default=(os.environ.get("QUICK") == "1"),
+        help="quick port scan: scans top 1000 ports instead of all 65535 ports in phase 4 (or QUICK=1)",
+    )
+    parser.add_argument(
+        "--top-ports",
+        type=int,
+        default=(int(os.environ["TOP_PORTS"]) if os.environ.get("TOP_PORTS") else None),
+        help="number of top ports to scan with nmap (e.g. 1000 or 100; default: all 65535 or 1000 with -q)",
+    )
+    parser.add_argument(
         "-y",
         "--yes",
         action="store_true",
@@ -322,6 +335,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         cloud_posture=bool(args.cloud_posture or scope.cloud_posture),
         use_prowler=bool(args.use_prowler or scope.use_prowler),
         saas_posture=bool(args.saas_posture or scope.saas_posture),
+        quick_scan=bool(args.quick or scope.quick_scan),
+        top_ports=(args.top_ports if args.top_ports is not None else scope.top_ports),
     )
     ctx.ensure_dirs()
     log.gaps_file = ctx.run_dir / "gaps.txt"
