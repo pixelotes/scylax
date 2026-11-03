@@ -14,7 +14,7 @@ from recon.config import ACTIVE_PHASES, DEFAULT_PHASES, RunContext, ScopeConfig
 from recon.deps import DependencyManager
 from recon.phases import PHASE_MAP, active, cloud, osint, saas, triage
 from recon.report import generate_reports
-from recon.runner import Logger, have, http_get
+from recon.runner import Logger, have, http_get, reset_phase_console
 from recon.venv_manager import ensure_venv
 
 
@@ -344,6 +344,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     ctx.ensure_dirs()
     log.gaps_file = ctx.run_dir / "gaps.txt"
+    # gaps.txt describes this run: a re-run that collects evidence starts it afresh
+    # (a triage-only re-run keeps the gaps of the run it reports on).
+    if any(p != "T" for p in ctx.phases) and log.gaps_file.is_file():
+        log.gaps_file.unlink()
 
     dm = DependencyManager(use_docker=ctx.use_docker, run_dir=ctx.run_dir)
     preflight(ctx, dm, log)
@@ -362,6 +366,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if fn is None:
             log.warn(f"unknown phase {p}")
             continue
+        reset_phase_console(ctx.console_dir, p)
         fn(ctx, dm, log)
 
     log.ok(f"Done. Evidence: {ctx.run_dir}")

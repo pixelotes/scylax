@@ -67,6 +67,11 @@ class ScopeConfig:
     edge_ips: List[str] = field(default_factory=list)
     edge_ports: str = "21,22,23,53,80,443,8291"
     exclude_ips: List[str] = field(default_factory=list)
+    # Ownership allowlist: when set, only discovered IPs inside these IPs/CIDRs
+    # (plus hvt_ips/edge_ips) are actively scanned. Everything else is treated
+    # as third-party hosting (CDN, SaaS, shared cloud) and left alone.
+    owned_ranges: List[str] = field(default_factory=list)
+    owned_ips_file: str = ""
     auto_discover_targets: bool = True
     skip_portscan_orgs: List[str] = field(
         default_factory=lambda: list(DEFAULT_SKIP_PORTSCAN_ORGS)
@@ -96,6 +101,28 @@ class ScopeConfig:
     min_apache: str = "2.4.65"
     min_nginx: str = "1.26.0"
     min_routeros: str = "7.15"
+
+    @property
+    def ownership_enforced(self) -> bool:
+        return bool(self.owned_ranges or self.owned_ips_file)
+
+    def owned_entries(self) -> List[str]:
+        """IPs/CIDRs we own: owned_ranges, hvt/edge IPs, and the first column of
+        owned_ips_file and any cloud inventory file ('#' starts a comment)."""
+        entries = list(self.owned_ranges) + list(self.hvt_ips) + list(self.edge_ips)
+        for f in (self.owned_ips_file, self.azure_inventory_file,
+                  self.gcp_inventory_file, self.aws_inventory_file):
+            if not f:
+                continue
+            p = Path(f)
+            if not p.is_absolute() and not p.is_file():
+                p = self.path.parent / p
+            if p.is_file():
+                for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+                    tok = re.split(r"[\s,;]+", line.split("#", 1)[0].strip())[0]
+                    if tok:
+                        entries.append(tok)
+        return entries
 
     @property
     def apex_trusted_orgs_regex(self) -> str:
@@ -286,6 +313,8 @@ class ScopeConfig:
             edge_ips=_split_list(flat.get("edge_ips")),
             edge_ports=_ports_csv(flat.get("edge_ports"), "21,22,23,53,80,443,8291"),
             exclude_ips=_split_list(flat.get("exclude_ips")),
+            owned_ranges=_split_list(flat.get("owned_ranges")),
+            owned_ips_file=str(flat.get("owned_ips_file") or "").strip(),
             auto_discover_targets=auto_discover_targets,
             skip_portscan_orgs=skip_portscan_orgs_list,
             apex_trusted_orgs=apex_orgs_list,

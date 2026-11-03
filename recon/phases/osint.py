@@ -34,6 +34,7 @@ from recon.runner import (
     record_virtual_cmd,
     run_cmd,
 )
+from recon.nvd import cpe_to_23, load_kev_ids, nvd_cves_for_cpe
 from recon.scope import ScopeGuard
 
 
@@ -336,7 +337,12 @@ def phase2(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     skip_re = None
     if ctx.scope.skip_portscan_orgs_regex and ctx.scope.skip_portscan_orgs_regex != r"^$":
         skip_re = re.compile(ctx.scope.skip_portscan_orgs_regex, re.IGNORECASE)
-    guard = ScopeGuard(list(ctx.scope.exclude_ips) + list(ctx.scope.edge_ips), {})
+    guard = ScopeGuard(
+        list(ctx.scope.exclude_ips) + list(ctx.scope.edge_ips),
+        {},
+        ctx.scope.owned_entries() if ctx.scope.ownership_enforced else None,
+    )
+    skipped_lines: list[str] = []
 
     for ip in sorted(ip_to_hosts.keys()):
         hosts = ip_to_hosts[ip]
@@ -352,21 +358,29 @@ def phase2(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 m = re.match(r"(?i)^(?:org-name|orgname|org|netname|descr|owner):\s*(.+)$", line.strip())
                 if m and m.group(1).strip() not in orgs:
                     orgs.append(m.group(1).strip())
-        org = orgs[0] if orgs else ""
+        org = "; ".join(orgs)
 
         hosts_sample = ",".join(hosts[:5])
         ip_orgs_lines.append(f"{ip}\t{org}\t{ptr}\t{hosts_sample}\n")
 
         if ctx.scope.auto_discover_targets:
+            reason = ""
             if not guard.ip_allowed(ip):
+                reason = "excluded/edge/non-public"
+            elif skip_re is not None and (
+                any(skip_re.search(o) for o in orgs) or (ptr and skip_re.search(ptr))
+            ):
+                reason = "cdn/saas org"
+            elif not guard.is_owned(ip):
+                reason = "not in owned_ranges (third-party hosting)"
+            if reason:
+                skipped_lines.append(f"{ip}\t{reason}\t{org}\t{ptr}\t{hosts_sample}\n")
                 continue
-            if skip_re is not None:
-                if any(skip_re.search(o) for o in orgs) or (ptr and skip_re.search(ptr)):
-                    continue
             discovered_targets.append(ip)
 
     discovered_targets = sorted(set(discovered_targets))
     (ctx.osint_dir / "ip_orgs.tsv").write_text("".join(ip_orgs_lines), encoding="utf-8")
+    (ctx.osint_dir / "skipped_targets.tsv").write_text("".join(skipped_lines), encoding="utf-8")
     (ctx.osint_dir / "discovered_targets.txt").write_text(
         "".join(f"{ip}\n" for ip in discovered_targets), encoding="utf-8"
     )
@@ -450,6 +464,11 @@ def phase6(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
     entry_points: list[tuple[str, str, str]] = []
     seen: set[tuple[str, str]] = set()
+    # Static assets carry cache-busters (?id=, ?v=) that are not entry points
+    static_re = re.compile(
+        r"\.(css|js|mjs|map|png|jpe?g|gif|svg|ico|webp|avif|woff2?|ttf|eot|otf|mp4|webm|mp3)$",
+        re.IGNORECASE,
+    )
 
     for u in unique_urls:
         if len(entry_points) >= 200:
@@ -457,6 +476,8 @@ def phase6(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         try:
             parsed = urllib.parse.urlsplit(u)
         except Exception:
+            continue
+        if static_re.search(parsed.path):
             continue
 
         base_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
@@ -665,6 +686,8 @@ def phase7(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     # Cache for CVEDB queries
     cpe_cache: dict[str, list[dict[str, Any]]] = {}
     cve_cache: dict[str, dict[str, Any]] = {}
+    # CVEDB (*.shodan.io) is often blocked by egress firewalls; fall back to NVD.
+    cve_source = {"name": "cvedb", "down": False}
 
     def fetch_cve(cve_id: str) -> dict[str, Any]:
         if cve_id in cve_cache:
@@ -685,6 +708,9 @@ def phase7(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         return res_info
 
     def fetch_cpe_cves(cpe: str) -> list[dict[str, Any]]:
+        cpe_full = cpe_to_23(cpe)
+        if cpe_full is None:
+            return []
         cpe_clean = cpe.strip()
         if cpe_clean.startswith("cpe:/"):
             parts = cpe_clean[len("cpe:/") :].split(":")
@@ -698,9 +724,20 @@ def phase7(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         if cpe23 in cpe_cache:
             return cpe_cache[cpe23]
 
-        url = f"https://cvedb.shodan.io/cves?cpe23={urllib.parse.quote(cpe23)}"
-        st, data = http_get_json(url, timeout=15)
         items: list[dict[str, Any]] = []
+        st, data = 0, None
+        if not cve_source["down"]:
+            url = f"https://cvedb.shodan.io/cves?cpe23={urllib.parse.quote(cpe23)}"
+            st, data = http_get_json(url, timeout=15)
+            if st == 0 or st == 403 or st >= 500:
+                cve_source.update(name="nvd", down=True)
+                log.warn("Shodan CVEDB unreachable - falling back to NVD API (set NVD_API_KEY to speed it up)")
+        if cve_source["down"]:
+            nvd_st, items = nvd_cves_for_cpe(cpe_full)
+            if nvd_st != 200:
+                log.warn(f"NVD lookup failed for {cpe_full} (HTTP {nvd_st})")
+            cpe_cache[cpe23] = items
+            return items
         if st == 200 and data is not None:
             raw_cves = (
                 data.get("cves")
@@ -832,6 +869,14 @@ def phase7(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                             }
                         )
 
+    kev_ids = load_kev_ids()
+    if kev_ids:
+        for f in findings:
+            if f["cve"] in kev_ids:
+                f["is_kev"] = True
+    else:
+        log.warn("CISA KEV catalogue unreachable - KEV flags rely on CVEDB data only")
+
     # Deduplicate findings by (ip, port, cve)
     seen_f: set[tuple[str, str, str]] = set()
     unique_findings: list[dict[str, Any]] = []
@@ -909,7 +954,7 @@ def phase7(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     record_virtual_cmd(
         ctx.console_dir,
         "7",
-        "cvedb-lookup --from-nmap-xml --shodan",
+        f"cve-lookup --from-nmap-xml --source {cve_source['name']} --kev cisa",
         summary_text.strip(),
         title="CVE & CISA KEV Correlation",
     )

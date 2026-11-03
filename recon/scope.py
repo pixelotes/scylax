@@ -64,14 +64,26 @@ def load_host_ips(osint_dir: Path) -> Dict[str, Set[str]]:
 class ScopeGuard:
     """Decides whether a host, IP or URL may be actively probed."""
 
-    def __init__(self, blocked: Iterable[str], host_ips: Dict[str, Set[str]]):
+    def __init__(
+        self,
+        blocked: Iterable[str],
+        host_ips: Dict[str, Set[str]],
+        owned: Iterable[str] | None = None,
+    ):
         self.blocked = parse_networks(blocked)
         self.host_ips = host_ips
+        # None = no ownership allowlist configured (any public IP is acceptable)
+        self.owned = parse_networks(owned) if owned is not None else None
 
-    def ip_allowed(self, ip: str) -> bool:
-        return is_public_ip(ip) and not ip_in(ip, self.blocked)
+    def is_owned(self, ip: str) -> bool:
+        return self.owned is None or ip_in(ip, self.owned)
 
-    def host_allowed(self, host: str) -> bool:
+    def ip_allowed(self, ip: str, require_owned: bool = False) -> bool:
+        if not is_public_ip(ip) or ip_in(ip, self.blocked):
+            return False
+        return self.is_owned(ip) if require_owned else True
+
+    def host_allowed(self, host: str, require_owned: bool = False) -> bool:
         """Hostnames are allowed only if every resolved IP is allowed.
 
         Unknown hostnames (not resolved in phase 2) are refused: we cannot
@@ -82,18 +94,18 @@ class ScopeGuard:
             return False
         try:
             ipaddress.ip_address(host.strip("[]"))
-            return self.ip_allowed(host.strip("[]"))
+            return self.ip_allowed(host.strip("[]"), require_owned)
         except ValueError:
             pass
         ips = self.host_ips.get(host)
         if not ips:
             return False
-        return all(self.ip_allowed(ip) for ip in ips)
+        return all(self.ip_allowed(ip, require_owned) for ip in ips)
 
-    def url_allowed(self, url: str) -> bool:
+    def url_allowed(self, url: str, require_owned: bool = False) -> bool:
         if "://" not in url:
             url = f"https://{url}"
-        return self.host_allowed(urllib.parse.urlparse(url).hostname or "")
+        return self.host_allowed(urllib.parse.urlparse(url).hostname or "", require_owned)
 
 
 def guard_for(ctx) -> ScopeGuard:
@@ -101,4 +113,5 @@ def guard_for(ctx) -> ScopeGuard:
     return ScopeGuard(
         list(ctx.scope.exclude_ips) + list(ctx.scope.edge_ips),
         load_host_ips(ctx.osint_dir),
+        ctx.scope.owned_entries() if ctx.scope.ownership_enforced else None,
     )

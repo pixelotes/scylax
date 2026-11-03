@@ -6,6 +6,7 @@ import csv
 import json
 from pathlib import Path
 import re
+import urllib.parse
 
 from recon.config import RunContext
 from recon.deps import DependencyManager
@@ -50,9 +51,20 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     ctx.ensure_dirs()
 
     candidates: list[tuple[str, str, str, str]] = []
+    key_index: dict[str, int] = {}
 
     def add(severity: str, key: str, title: str, evidence: str) -> None:
-        candidates.append((severity.lower().strip(), key.strip(), title.strip(), evidence.strip()))
+        """One candidate per rule key; extra evidence (e.g. other ports) is merged."""
+        key = key.strip()
+        evidence = evidence.strip()
+        if key in key_index:
+            i = key_index[key]
+            sev0, _, title0, ev0 = candidates[i]
+            if evidence and evidence not in ev0.split("; "):
+                candidates[i] = (sev0, key, title0, f"{ev0}; {evidence}" if ev0 else evidence)
+            return
+        key_index[key] = len(candidates)
+        candidates.append((severity.lower().strip(), key, title.strip(), evidence))
 
     # ------------------------------------------------------------------
     # 2. DNS & Mail Posture per domain
@@ -146,6 +158,14 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                     if parts and parts[0].strip():
                         known_ips.add(parts[0].strip())
 
+        ip_org_map: dict[str, str] = {}
+        ip_orgs_file = ctx.osint_dir / "ip_orgs.tsv"
+        if ip_orgs_file.is_file():
+            for l in ip_orgs_file.read_text(encoding="utf-8", errors="replace").splitlines():
+                cols = l.split("\t")
+                if len(cols) >= 2 and cols[1].strip():
+                    ip_org_map[cols[0].strip()] = cols[1].strip()
+
         apex_text = apex_file.read_text(encoding="utf-8", errors="replace")
         blocks: list[tuple[str, str, list[str]]] = []
         cur_d = ""
@@ -181,6 +201,8 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                         org = m_net.group(1).strip()
                         break
 
+            if not org:
+                org = ip_org_map.get(ip, "")
             trusted_re = ctx.scope.apex_trusted_orgs_regex
             is_trusted = False
             if ctx.scope.apex_trusted_orgs and org and trusted_re:
@@ -258,6 +280,45 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 else:
                     add("low", f"cookie:{url}", "Session cookie missing security flags", f"{url}: {detail}")
 
+    # Vanity redirects that disclose the Entra tenant / app IDs and the SaaS map
+    httpx_txt = ctx.web_dir / "httpx_all.txt"
+    if httpx_txt.is_file():
+        tenants: set[str] = set()
+        saas_hosts: set[str] = set()
+        sources: list[str] = []
+        own_suffixes = tuple(f".{d}" for d in ctx.scope.domains) + tuple(ctx.scope.domains)
+        for line in httpx_txt.read_text(encoding="utf-8", errors="replace").splitlines():
+            m = re.match(r"^(\S+)\s+\[(30[1278])\].*\[([^\]]*)\]\s*$", line.strip())
+            if not m or not m.group(3).startswith("http"):
+                continue
+            loc = m.group(3)
+            loc_host = (urllib.parse.urlparse(loc).hostname or "").lower()
+            if not loc_host or loc_host.endswith(own_suffixes):
+                continue
+            tid = re.search(
+                r"(?i)(?:tenantId=|login\.microsoftonline\.com/)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
+                loc,
+            )
+            if tid:
+                tenants.add(tid.group(1).lower())
+            saas_hosts.add(loc_host)
+            sources.append(urllib.parse.urlparse(m.group(1)).hostname or m.group(1))
+        if tenants:
+            add(
+                "medium",
+                "redirect-tenant-leak",
+                "Vanity redirects disclose Entra tenant / app IDs and SaaS map",
+                f"tenant {', '.join(sorted(tenants))}; {len(set(sources))} hosts -> "
+                f"{', '.join(sorted(saas_hosts)[:8])}",
+            )
+        elif len(saas_hosts) >= 3:
+            add(
+                "low",
+                "redirect-saas-map",
+                "Vanity redirects disclose the SaaS map",
+                f"{len(set(sources))} hosts -> {', '.join(sorted(saas_hosts)[:8])}",
+            )
+
     entry_file = ctx.osint_dir / "entry_points.tsv"
     if entry_file.is_file():
         cat_groups: dict[str, list[str]] = {}
@@ -283,6 +344,14 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     # ------------------------------------------------------------------
     # 6. Nmap Service Scans
     # ------------------------------------------------------------------
+    MGMT_UI_RE = re.compile(
+        r"\b(?:OPNsense|pfSense|FortiGate|FortiOS|Fortinet|Sophos|SonicWALL|WatchGuard|"
+        r"WebFig|RouterOS|MikroTik|Ubiquiti|UniFi|Webmin|Proxmox|VMware ESXi|vCenter|"
+        r"iDRAC|Integrated Lights-Out|iLO|Supermicro|Synology|QNAP|cPanel|Plesk|"
+        r"phpMyAdmin|Jenkins|Grafana|Kibana|Portainer|RabbitMQ Management|Tomcat Manager)\b",
+        re.IGNORECASE,
+    )
+
     MGMT_PORTS = {
         21,
         23,
@@ -387,13 +456,19 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 add("low", f"fakecert:{ip}", "Default Kubernetes ingress certificate", ip)
 
             # Firewall admin GUI
-            m_fw = re.search(r"Login\s*\|\s*OPNsense|pfSense|FortiGate|Sophos|WebFig|RouterOS", block)
+            mgmt_lines = [
+                l for l in block.splitlines()
+                if re.match(r"^\d+/tcp\s+open\b", l.strip()) or "http-title" in l
+            ]
+            m_fw = MGMT_UI_RE.search("\n".join(mgmt_lines))
             if m_fw:
+                port_m = re.search(r"^(\d+)/tcp\s+open\b.*" + re.escape(m_fw.group(0)), block, re.M)
+                where = f"{ip}:{port_m.group(1)}" if port_m else ip
                 add(
                     "high",
                     f"fw-admin:{ip}",
-                    "Firewall / router admin GUI on the internet",
-                    m_fw.group(0),
+                    "Firewall / router / server management interface on the internet",
+                    f"{where} {m_fw.group(0)}",
                 )
 
             # Expired TLS cert
@@ -469,10 +544,14 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                         if cve_code not in seen_top:
                             seen_top.add(cve_code)
                             top_cves.append(cve_code)
+                    # Distro packages (Ubuntu/Debian/RHEL...) backport fixes without
+                    # changing the upstream version: version-matched CVEs need checking.
+                    distro = re.search(r"(?i)ubuntu|debian|deb\d|\.el\d|rhel|centos|suse|alpine", service_ver)
                     add(
-                        "high",
+                        "medium" if distro else "high",
                         f"cve-high:{ip_cve}:{port_cve}",
-                        f"High-severity CVEs (max CVSS {max_cvss}) on {service_ver}".strip(),
+                        f"High-severity CVEs (max CVSS {max_cvss}) on {service_ver}".strip()
+                        + (" - distro build, verify backports" if distro else ""),
                         f"{ip_cve}:{port_cve} -> {', '.join(top_cves[:5])}",
                     )
 

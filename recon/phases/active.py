@@ -301,6 +301,7 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                     raw_ips.append((ip_str, False))
 
     blocked = parse_networks(list(ctx.scope.exclude_ips) + list(ctx.scope.edge_ips))
+    owned_guard = guard_for(ctx)
     target_ips: list[str] = []
     seen_ips: set[str] = set()
     for ip, declared in raw_ips:
@@ -308,6 +309,9 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
             continue
         if not declared and not is_public_ip(ip):
             log.warn(f"Phase 4: skipping non-public discovered IP {ip}")
+            continue
+        if not declared and not owned_guard.is_owned(ip):
+            log.warn(f"Phase 4: skipping {ip} - outside owned_ranges")
             continue
         seen_ips.add(ip)
         target_ips.append(ip)
@@ -602,7 +606,9 @@ def phase8(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         if host in hvt_set:
             if ip_in(host, blocked):
                 continue
-        elif not guard.url_allowed(t):
+        elif not guard.url_allowed(t, require_owned=True):
+            # nuclei only runs against infrastructure we own; CDN/SaaS-hosted
+            # names still get the light httpx/well-known checks in phase 3.
             continue
         if t not in seen:
             seen.add(t)

@@ -43,8 +43,13 @@ class Logger:
         self._c("33", f"[!] {msg}")
         if self.gaps_file is not None:
             self.gaps_file.parent.mkdir(parents=True, exist_ok=True)
-            with self.gaps_file.open("a", encoding="utf-8") as f:
-                f.write(f"{msg}\n")
+            existing = (
+                self.gaps_file.read_text(encoding="utf-8", errors="replace").splitlines()
+                if self.gaps_file.is_file() else []
+            )
+            if msg not in existing:
+                with self.gaps_file.open("a", encoding="utf-8") as f:
+                    f.write(f"{msg}\n")
 
     def error(self, msg: str) -> None:
         self._c("31", f"[-] {msg}")
@@ -143,6 +148,27 @@ def record_virtual_cmd(
     jsonl_path = console_dir / "commands.jsonl"
     with jsonl_path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record) + "\n")
+
+
+def reset_phase_console(console_dir: Path, phase: str) -> None:
+    """Drop a phase's previous evidence so re-running it in the same run dir
+    replaces its console output instead of appending a duplicate copy."""
+    log_path = console_dir / f"{phase}.log"
+    if log_path.is_file():
+        log_path.unlink()
+    jsonl_path = console_dir / "commands.jsonl"
+    if not jsonl_path.is_file():
+        return
+    kept: list[str] = []
+    for line in jsonl_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            if str(json.loads(line).get("phase")) == str(phase):
+                continue
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        if line.strip():
+            kept.append(line)
+    jsonl_path.write_text("".join(f"{l}\n" for l in kept), encoding="utf-8")
 
 
 def ev(

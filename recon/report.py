@@ -331,6 +331,8 @@ class RunData:
         if path.is_file():
             for line in _safe_read_lines(path):
                 parts = line.split("\t")
+                if len(parts) >= 8 and parts[0].strip().lower() == "ip" and parts[4].strip().lower() == "cve":
+                    continue  # header row
                 if len(parts) >= 8:
                     try:
                         cvss_val = float(parts[5].strip()) if parts[5].strip() else 0.0

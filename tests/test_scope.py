@@ -102,5 +102,27 @@ class TestActivePhasesScope(unittest.TestCase):
             self.assertEqual(load_host_ips(Path(td)), {})
 
 
+
+class TestOwnership(unittest.TestCase):
+    def test_owned_allowlist(self) -> None:
+        # Owned/allowlist checks need globally routable IPs (TEST-NET ranges are rejected)
+        guard = ScopeGuard([], {"cdn.example.com": {"1.1.1.1"}, "app.example.com": {"93.184.216.34"}},
+                           owned=["93.184.216.0/24"])
+        self.assertTrue(guard.ip_allowed("1.1.1.1"))  # light probing still allowed
+        self.assertFalse(guard.ip_allowed("1.1.1.1", require_owned=True))
+        self.assertTrue(guard.url_allowed("https://app.example.com", require_owned=True))
+        self.assertFalse(guard.url_allowed("https://cdn.example.com", require_owned=True))
+
+    def test_owned_entries_from_file(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "owned.txt").write_text("# azure\n198.51.100.198\tvm-lb\n203.0.113.0/25\n", encoding="utf-8")
+            scope = ScopeConfig(path=root / "s.toml", name="s", engagement="s",
+                                hvt_ips=["203.0.113.110"], owned_ips_file="owned.txt")
+            self.assertTrue(scope.ownership_enforced)
+            self.assertEqual(sorted(scope.owned_entries()), ["198.51.100.198", "203.0.113.0/25", "203.0.113.110"])
+
+
+
 if __name__ == "__main__":
     unittest.main()
