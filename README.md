@@ -1,4 +1,4 @@
-# Scylax — Digital Attack Surface Cartography (EASM | CSPM | OSINT | SSPM)
+# Scylax, a Digital Attack Surface Cartography tool.
 
 ```text
    ███████╗ ██████╗██╗   ██╗██╗      █████╗ ██╗  ██╗
