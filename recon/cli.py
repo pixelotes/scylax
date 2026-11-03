@@ -181,8 +181,8 @@ def preflight(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     ok_req = dm.print_report(statuses)
 
     for st in statuses:
-        if not st.available and not st.spec.required and st.needed_for_phases:
-            log.warn(f"{st.spec.name} not available ({st.spec.install_macos}) - phase {'/'.join(st.spec.phases)} degraded")
+        if not st.available and not st.is_required_for_active and st.needed_for_phases:
+            log.warn(f"{st.plugin.name} not available ({st.plugin.install_macos}) - phase {'/'.join(st.plugin.phases)} degraded")
 
     if not ok_req:
         log.error("Missing required dependencies for requested phases. Install them or try --docker.")
