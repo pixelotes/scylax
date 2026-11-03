@@ -131,6 +131,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="do not ask for confirmation before active phases (or YES=1)",
     )
     parser.add_argument(
+        "--authorised-by",
+        default=os.environ.get("AUTHORISED_BY", "").strip(),
+        help="override authorised_by written authorisation string for active phases",
+    )
+    parser.add_argument(
+        "--authorisation-ref",
+        default=os.environ.get("AUTHORISATION_REF", "").strip(),
+        help="override authorisation_ref ticket/reference string for active phases",
+    )
+    parser.add_argument(
         "-D",
         "--docker",
         action="store_true",
@@ -284,6 +294,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     except Exception as exc:
         log.error(f"Failed to load scope configuration: {exc}")
         return 1
+
+    if args.authorised_by:
+        scope.authorised_by = args.authorised_by.strip()
+    elif not scope.authorised_by and os.environ.get("AUTHORISED_BY"):
+        scope.authorised_by = os.environ.get("AUTHORISED_BY", "").strip()
+
+    if args.authorisation_ref:
+        scope.authorisation_ref = args.authorisation_ref.strip()
+    elif not scope.authorisation_ref and os.environ.get("AUTHORISATION_REF"):
+        scope.authorisation_ref = os.environ.get("AUTHORISATION_REF", "").strip()
 
     phases = [p.strip() for p in re.split(r"[\s,]+", args.phases) if p.strip()]
 
