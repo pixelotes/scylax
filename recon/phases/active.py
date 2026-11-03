@@ -294,7 +294,13 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     target_ips: list[str] = []
     seen_ips: set[str] = set()
     for ip in raw_ips:
-        if ip not in seen_ips and ip not in exclude_ips:
+        if (
+            ip not in seen_ips
+            and ip not in exclude_ips
+            and not ip.startswith("127.")
+            and ip != "::1"
+            and ip != "0.0.0.0"
+        ):
             seen_ips.add(ip)
             target_ips.append(ip)
 
@@ -302,30 +308,47 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         log.warn("nmap not available - phase 4 skipped")
         return
 
-    for ip in target_ips:
-        full_prefix = ctx.scan_dir / f"full_{ip}"
-        ev(
-            ctx.console_dir,
-            "4",
-            dm.build_cmd(
-                "nmap",
-                [
-                    "-sT",
-                    "-Pn",
-                    "-p-",
-                    "--max-rate",
-                    str(ctx.scope.nmap_max_rate),
-                    "--open",
-                    "-oA",
-                    str(full_prefix),
-                    ip,
-                ],
-            ),
-            timeout=1800,
-            title=f"nmap full TCP ({ip})",
-        )
+    if not target_ips:
+        log.info("No target IPs to scan in phase 4")
+        return
 
+    total = len(target_ips)
+    log.info(f"Phase 4: Scanning {total} targets (rate: {ctx.scope.nmap_max_rate} pkts/s, max-retries: 1, host-timeout: 5m)")
+
+    for idx, ip in enumerate(target_ips, 1):
+        full_prefix = ctx.scan_dir / f"full_{ip}"
         nmap_file = ctx.scan_dir / f"full_{ip}.nmap"
+
+        # Check if already scanned in an earlier or interrupted run
+        if nmap_file.is_file() and nmap_file.stat().st_size > 0:
+            log.info(f"[{idx}/{total}] Reusing existing scan for {ip}")
+        else:
+            log.info(f"[{idx}/{total}] Scanning full TCP ports on {ip}...")
+            ev(
+                ctx.console_dir,
+                "4",
+                dm.build_cmd(
+                    "nmap",
+                    [
+                        "-sT",
+                        "-Pn",
+                        "-p-",
+                        "--max-rate",
+                        str(ctx.scope.nmap_max_rate),
+                        "--max-retries",
+                        "1",
+                        "--host-timeout",
+                        "5m",
+                        "--open",
+                        "-oA",
+                        str(full_prefix),
+                        ip,
+                    ],
+                ),
+                timeout=360,
+                title=f"nmap full TCP ({ip})",
+            )
+
         open_ports: list[str] = []
         if nmap_file.is_file():
             for line in nmap_file.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -334,39 +357,48 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                     open_ports.append(m.group(1))
 
         if not open_ports:
-            log.warn(f"{ip}: no open TCP ports")
+            log.warn(f"[{idx}/{total}] {ip}: no open TCP ports")
             continue
 
         ports_csv = ",".join(open_ports)
         svc_prefix = ctx.scan_dir / f"svc_{ip}"
-        ev(
-            ctx.console_dir,
-            "4",
-            dm.build_cmd(
-                "nmap",
-                [
-                    "-sT",
-                    "-Pn",
-                    "-p",
-                    ports_csv,
-                    "--max-rate",
-                    str(ctx.scope.nmap_max_rate),
-                    "-sV",
-                    "--script",
-                    "banner,ssl-cert,ssh2-enum-algos,http-title,http-headers,http-server-header",
-                    "-oA",
-                    str(svc_prefix),
-                    ip,
-                ],
-            ),
-            timeout=900,
-            title=f"nmap service scan ({ip})",
-        )
-        log.ok(f"{ip}: {ports_csv}")
+        svc_file = ctx.scan_dir / f"svc_{ip}.nmap"
+
+        if svc_file.is_file() and svc_file.stat().st_size > 0:
+            log.ok(f"[{idx}/{total}] {ip}: {ports_csv} (reused service scan)")
+        else:
+            log.info(f"[{idx}/{total}] Service fingerprinting on {ip}:{ports_csv}...")
+            ev(
+                ctx.console_dir,
+                "4",
+                dm.build_cmd(
+                    "nmap",
+                    [
+                        "-sT",
+                        "-Pn",
+                        "-p",
+                        ports_csv,
+                        "--max-rate",
+                        str(ctx.scope.nmap_max_rate),
+                        "--host-timeout",
+                        "5m",
+                        "-sV",
+                        "--script",
+                        "banner,ssl-cert,ssh2-enum-algos,http-title,http-headers,http-server-header",
+                        "-oA",
+                        str(svc_prefix),
+                        ip,
+                    ],
+                ),
+                timeout=360,
+                title=f"nmap service scan ({ip})",
+            )
+            log.ok(f"[{idx}/{total}] {ip}: {ports_csv}")
 
     if hasattr(os, "geteuid") and os.geteuid() == 0:
-        for ip in target_ips:
+        for idx, ip in enumerate(target_ips, 1):
             udp_prefix = ctx.scan_dir / f"udp_{ip}"
+            log.info(f"[{idx}/{total}] Scanning UDP VPN ports on {ip}...")
             ev(
                 ctx.console_dir,
                 "4",
@@ -379,12 +411,14 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                         "500,4500,443",
                         "--max-rate",
                         "100",
+                        "--host-timeout",
+                        "3m",
                         "-oA",
                         str(udp_prefix),
                         ip,
                     ],
                 ),
-                timeout=900,
+                timeout=240,
                 title=f"nmap UDP ({ip})",
             )
     else:
@@ -402,8 +436,14 @@ def phase4b(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         log.warn("nmap not available - phase 4b skipped")
         return
 
-    for ip in ctx.scope.edge_ips:
+    total_edges = len(ctx.scope.edge_ips)
+    for idx, ip in enumerate(ctx.scope.edge_ips, 1):
         edge_prefix = ctx.scan_dir / f"edge_{ip}"
+        edge_file = ctx.scan_dir / f"edge_{ip}.nmap"
+        if edge_file.is_file() and edge_file.stat().st_size > 0:
+            log.info(f"[{idx}/{total_edges}] Reusing existing edge scan for {ip}")
+            continue
+        log.info(f"[{idx}/{total_edges}] Fingerprinting edge device {ip} (ports: {ctx.scope.edge_ports})...")
         ev(
             ctx.console_dir,
             "4b",
@@ -415,6 +455,8 @@ def phase4b(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                     "-T2",
                     "--max-rate",
                     str(ctx.scope.edge_max_rate),
+                    "--host-timeout",
+                    "5m",
                     "-p",
                     ctx.scope.edge_ports,
                     "-sV",
@@ -425,7 +467,7 @@ def phase4b(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                     ip,
                 ],
             ),
-            timeout=600,
+            timeout=360,
             title=f"nmap edge fingerprint ({ip})",
         )
     log.ok(f"Phase 4b complete for {len(ctx.scope.edge_ips)} edge devices")
