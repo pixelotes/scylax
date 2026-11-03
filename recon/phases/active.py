@@ -313,7 +313,17 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         return
 
     total = len(target_ips)
-    log.info(f"Phase 4: Scanning {total} targets (rate: {ctx.scope.nmap_max_rate} pkts/s, max-retries: 1, host-timeout: 5m)")
+    top_p = ctx.top_ports or (1000 if ctx.quick_scan or getattr(ctx.scope, "quick_scan", False) else None)
+    if top_p:
+        port_scan_args = ["--top-ports", str(top_p)]
+        scan_desc = f"top {top_p} ports"
+        scan_title_suffix = f"top {top_p}"
+    else:
+        port_scan_args = ["-p-"]
+        scan_desc = "all 65535 ports"
+        scan_title_suffix = "full"
+
+    log.info(f"Phase 4: Scanning {total} targets ({scan_desc}, rate: {ctx.scope.nmap_max_rate} pkts/s, max-retries: 1, host-timeout: 5m)")
 
     for idx, ip in enumerate(target_ips, 1):
         full_prefix = ctx.scan_dir / f"full_{ip}"
@@ -323,7 +333,7 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         if nmap_file.is_file() and nmap_file.stat().st_size > 0:
             log.info(f"[{idx}/{total}] Reusing existing scan for {ip}")
         else:
-            log.info(f"[{idx}/{total}] Scanning full TCP ports on {ip}...")
+            log.info(f"[{idx}/{total}] Scanning {scan_desc} on {ip}...")
             ev(
                 ctx.console_dir,
                 "4",
@@ -332,7 +342,7 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                     [
                         "-sT",
                         "-Pn",
-                        "-p-",
+                        *port_scan_args,
                         "--max-rate",
                         str(ctx.scope.nmap_max_rate),
                         "--max-retries",
@@ -346,7 +356,7 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                     ],
                 ),
                 timeout=360,
-                title=f"nmap full TCP ({ip})",
+                title=f"nmap {scan_title_suffix} TCP ({ip})",
             )
 
         open_ports: list[str] = []
