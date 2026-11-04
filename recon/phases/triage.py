@@ -234,6 +234,25 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
             if h and re.search(r"^[^.]*internal", h, re.IGNORECASE):
                 add("medium", f"internal-name:{h}", "Internal-named host publicly resolvable", h)
 
+    traversal_file = ctx.web_dir / "path_traversal.tsv"
+    if traversal_file.is_file():
+        for line in traversal_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            parts = line.strip().split("\t")
+            if len(parts) >= 2:
+                url, target = parts[0].strip(), parts[1].strip()
+                snippet = parts[2].strip() if len(parts) > 2 else ""
+                add("high", f"traversal:{url}", "Path traversal / local file inclusion confirmed",
+                    f"{url} -> {target} ({snippet})", target=url)
+
+    content_file = ctx.web_dir / "content_discovery.tsv"
+    if content_file.is_file():
+        for line in content_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            parts = line.strip().split("\t")
+            if len(parts) >= 4:
+                url, status, size, cat = (x.strip() for x in parts[:4])
+                add(cat, f"content-disc:{url}",
+                    f"Exposed path reachable (HTTP {status})", f"{url} [{status}, {size} bytes]", target=url)
+
     secret_leaks_file = ctx.osint_dir / "secret_leaks.tsv"
     if secret_leaks_file.is_file():
         for line in secret_leaks_file.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -1102,6 +1121,7 @@ _PHASE_BY_PREFIX: tuple[tuple[str, str], ...] = (
     ("nuclei:", "8"), ("sensitive-path:", "8"),
     ("takeover:", "2"),
     ("secret-leak:", "9"),
+    ("content-disc:", "C"), ("traversal:", "C"),
 )
 
 
@@ -1110,6 +1130,8 @@ _PHASE_BY_PREFIX: tuple[tuple[str, str], ...] = (
 _TOOLS_BY_PREFIX: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("nuclei:", ("nuclei",)),
     ("secret-leak:", ("gitleaks", "trufflehog", "git")),
+    ("content-disc:", ("gobuster",)),
+    ("traversal:", ("gobuster",)),
     ("takeover:", ("dig",)),
     ("mgmt:", ("nmap",)), ("ssh:", ("nmap",)), ("ssh-weak:", ("nmap",)), ("apache:", ("nmap",)),
     ("nginx:", ("nmap",)), ("routeros:", ("nmap",)), ("fakecert:", ("nmap",)), ("fw-admin:", ("nmap",)),
@@ -1173,7 +1195,7 @@ def _update_history(ctx: RunContext, curr_map: dict[str, tuple[str, str, str, st
 # instead of as a directory listing + data file + API docs + hashed name.
 _IP_KEY_PREFIXES = ("502:", "apache:", "cert-expired:", "fakecert:", "fw-admin:", "nginx:",
                     "routeros:", "ssh:", "ssh-weak:")
-_URL_KEY_PREFIXES = ("cookie:", "cors:", "dirlist:", "exposed-api:", "exposed-path:", "robots:", "sensitive-path:")
+_URL_KEY_PREFIXES = ("cookie:", "cors:", "dirlist:", "exposed-api:", "exposed-path:", "robots:", "sensitive-path:", "content-disc:", "traversal:")
 _HOST_KEY_PREFIXES = ("api-data:", "data-export:", "hash-host:")
 _DOMAIN_KEY_PREFIXES = ("apex:", "axfr:", "caa:", "dmarc:", "dnssec:", "spf:", "whois:", "wildcard:",
                         "internal-name:")
@@ -1205,7 +1227,7 @@ def finding_target(key: str) -> str:
     return ""
 
 
-_HOST_FOLD_PREFIXES = ("api-data:", "data-export:", "exposed-path:", "dirlist:", "exposed-api:", "hash-host:", "sensitive-path:")
+_HOST_FOLD_PREFIXES = ("api-data:", "data-export:", "exposed-path:", "dirlist:", "exposed-api:", "hash-host:", "sensitive-path:", "content-disc:", "traversal:")
 
 
 def _fold_host(key: str) -> str | None:

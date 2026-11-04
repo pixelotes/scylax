@@ -10,9 +10,10 @@ from pathlib import Path
 from typing import List
 
 
-DEFAULT_PHASES: List[str] = ["1", "2", "3", "4", "4b", "5", "6", "7", "8", "9", "A", "G", "W", "S", "T"]
-ACTIVE_PHASES: set[str] = {"3", "4", "4b", "5", "8", "A", "G", "W"}
+DEFAULT_PHASES: List[str] = ["1", "2", "3", "4", "4b", "5", "6", "7", "8", "9", "A", "G", "W", "S", "C", "T"]
+ACTIVE_PHASES: set[str] = {"3", "4", "4b", "5", "8", "A", "G", "W", "C"}
 CLOUD_PHASES: set[str] = {"A", "G", "W"}
+CONTENT_PHASES: set[str] = {"C"}
 
 
 def _split_list(val: object) -> List[str]:
@@ -24,6 +25,15 @@ def _split_list(val: object) -> List[str]:
     if isinstance(val, str):
         return [x.strip() for x in re.split(r"[\s,]+", val) if x.strip()]
     raise ValueError(f"Expected list or string, got {type(val).__name__}")
+
+
+def _as_bool(val: object, default: bool = False) -> bool:
+    """Accept a TOML bool/int or a string like 'true'/'1'/'yes'."""
+    if val is None:
+        return default
+    if isinstance(val, (int, bool)):
+        return bool(val)
+    return str(val).strip().lower() not in ("", "0", "false", "no")
 
 
 def _ports_csv(val: object, default: str) -> str:
@@ -75,6 +85,9 @@ class ScopeConfig:
     owned_ips_file: str = ""
     runs_dir: str = ""
     alert_webhook: str = ""
+    content_discovery: bool = False
+    content_discovery_wordlist: str = ""
+    content_discovery_rate: int = 20
     auto_discover_targets: bool = True
     skip_portscan_orgs: List[str] = field(
         default_factory=lambda: list(DEFAULT_SKIP_PORTSCAN_ORGS)
@@ -333,6 +346,15 @@ class ScopeConfig:
             owned_ips_file=str(flat.get("owned_ips_file") or "").strip(),
             runs_dir=str(flat.get("runs_dir") or flat.get("engagement_runs_dir") or "").strip(),
             alert_webhook=str(flat.get("alert_webhook") or flat.get("engagement_alert_webhook") or "").strip(),
+            content_discovery=_as_bool(
+                flat.get("content_discovery_enabled")
+                if flat.get("content_discovery_enabled") is not None
+                else (flat.get("content_discovery_content_discovery")
+                      if flat.get("content_discovery_content_discovery") is not None
+                      else flat.get("content_discovery"))
+            ),
+            content_discovery_wordlist=str(flat.get("content_discovery_wordlist") or "").strip(),
+            content_discovery_rate=int(flat.get("content_discovery_rate") or 20),
             auto_discover_targets=auto_discover_targets,
             skip_portscan_orgs=skip_portscan_orgs_list,
             apex_trusted_orgs=apex_orgs_list,
@@ -424,6 +446,8 @@ class RunContext:
                 return "no cloud provider configured in scope"
         if phase == "S" and not self.saas_posture:
             return "SaaS posture disabled"
+        if phase in CONTENT_PHASES and not self.explicit_phases and not getattr(self.scope, "content_discovery", False):
+            return "content discovery disabled"
         return ""
 
     def cloud_configured(self, phase: str) -> bool:
@@ -543,6 +567,8 @@ _SCOPE_SCHEMA: dict[str, tuple[str, ...]] = {
     "cloud_posture": ("cloud_posture", "enabled", "use_prowler", "prowler"),
     "saas": ("saas_posture", "providers"),
     "intelligence": ("shodan_api_key", "shodan_key", "hibp_api_key", "hibp_key"),
+    "content_discovery": ("content_discovery", "enabled", "wordlist", "rate",
+                          "content_discovery_wordlist", "content_discovery_rate"),
     "limits": ("edge_max_rate", "nmap_max_rate", "httpx_rate", "nuclei_rate",
                "amass_timeout_min", "top_ports", "edge_ports"),
     "thresholds": ("min_apache", "min_nginx", "min_routeros"),
@@ -563,19 +589,27 @@ def validate_scope(path: Path) -> tuple[list[str], list[str]]:
     except Exception as exc:  # noqa: BLE001
         return [f"not valid TOML: {exc}"], []
 
+    # A key is accepted anywhere it is a canonical name, in its own section, or in
+    # its section-prefixed form (the loader flattens all three). Only genuinely
+    # unrecognised names and sections are flagged.
+    known: set[str] = set(_SCOPE_SCHEMA[""])
+    for sect, keys in _SCOPE_SCHEMA.items():
+        for k in keys:
+            known.add(k)
+            if sect:
+                known.add(f"{sect}_{k}")
     for key, val in raw.items():
         if isinstance(val, dict):
-            allowed = _SCOPE_SCHEMA.get(key.lower())
-            if allowed is None:
+            if key.lower() not in _SCOPE_SCHEMA:
                 warnings.append(f"unknown section [{key}]")
                 continue
             if not val:
                 warnings.append(f"section [{key}] is empty")
             for sk in val:
-                if sk.lower() not in allowed:
+                if sk.lower() not in known:
                     warnings.append(f"unknown key '{sk}' in [{key}]")
         else:
-            if key.lower() not in _SCOPE_SCHEMA[""]:
+            if key.lower() not in known:
                 warnings.append(f"unknown top-level key '{key}'")
 
     try:

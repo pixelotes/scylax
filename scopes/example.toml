@@ -132,6 +132,19 @@ shodan_api_key = ""
 # HaveIBeenPwned: enterprise domain breach and leaked account exposure audit (Phase 9).
 hibp_api_key = ""
 
+[content_discovery]
+# Phase C: content discovery (optional, opt-in). Actively checks whether paths that
+# should not be reachable are exposed — control panels, API docs (Swagger/FastAPI),
+# source control, config, backups, telemetry — plus signature-confirmed path
+# traversal. Non-intrusive: GET only, rate limited, owned hosts only. Uses gobuster
+# when available, else a native probe. Runs only when enabled here or named with -p C.
+enabled = false
+# Optional custom wordlist (absolute, or relative to this scope file). Empty = the
+# bundled curated list (recon/data/content_discovery.txt).
+wordlist = ""
+# Requests per second per host (native probe and gobuster --delay).
+rate = 20
+
 [saas]
 # Phase S: SaaS Security Posture checks (Microsoft 365 / Entra ID, GitHub, Google Workspace).
 # This phase performs authenticated, read-only configuration audits of the organization's own SaaS tenants,

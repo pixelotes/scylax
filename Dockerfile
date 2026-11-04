@@ -38,7 +38,8 @@ RUN --mount=type=cache,target=/root/go/pkg/mod --mount=type=cache,target=/root/.
  && go install -ldflags="-s -w" github.com/projectdiscovery/dnsx/cmd/dnsx@${DNSX_VERSION} \
  && go install -ldflags="-s -w" github.com/projectdiscovery/httpx/cmd/httpx@${HTTPX_VERSION} \
  && go install -ldflags="-s -w" github.com/projectdiscovery/nuclei/v3/cmd/nuclei@${NUCLEI_VERSION} \
- && go install -ldflags="-s -w" github.com/owasp-amass/amass/v4/...@${AMASS_VERSION}
+ && go install -ldflags="-s -w" github.com/owasp-amass/amass/v4/...@${AMASS_VERSION} \
+ && go install -ldflags="-s -w" github.com/OJ/gobuster/v3@${GOBUSTER_VERSION}
 
 # ---------------------------------------------------------------------------
 # core: Scylax + network / OSINT tooling
