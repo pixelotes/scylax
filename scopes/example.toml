@@ -197,6 +197,16 @@ providers = ["m365", "github", "google"]
 enabled = false
 org_names = []                # extra tenant names to try, e.g. ["contoso-corp"]
 
+# Optional: also run Intigriti's misconfig-mapper (go install github.com/intigriti/misconfig-mapper/cmd/misconfig-mapper@latest)
+# against the same names. Scylax always passes -permutations false (exact names only), a delay between
+# requests, and only the templates that are plain GET requests: templates that POST a payload are never run.
+# It never downloads templates itself: point misconfig_templates at a folder holding services.json
+# (fetch it once with: misconfig-mapper -update-templates -templates DIR) or keep ./templates in the working dir.
+use_misconfig_mapper = false
+misconfig_services = []       # names or ids to restrict to, e.g. ["atlassian", "jenkins"]; empty = every plain-GET template
+misconfig_templates = ""
+misconfig_delay_ms = 1000
+
 [limits]
 # Scan rate limits (keep conservative on production networks).
 nmap_max_rate = 400           # packets/sec for HVT and cloud scans

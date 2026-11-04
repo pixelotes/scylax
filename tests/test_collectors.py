@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from recon import saas_exposure, tlsposture, wellknown
+from recon import misconfig, saas_exposure, tlsposture, wellknown
 
 XML = """<nmaprun><host><address addr="203.0.113.5" addrtype="ipv4"/><ports>
 <port protocol="tcp" portid="443"><script id="ssl-cert" output="">
@@ -119,6 +119,58 @@ class SaasExposureTests(unittest.TestCase):
         })
         _, findings = saas_exposure.check_atlassian("acme", fetch, lambda c, s: None)
         self.assertIn("saas-exposure:jira-issues:acme", {f[1] for f in findings})
+
+
+SERVICES = [
+    {"id": 0, "request": {"method": "GET", "baseURL": "https://{TARGET}.atlassian.net", "path": ["/a"], "body": None},
+     "metadata": {"service": "atlassian", "serviceName": "Jira Open Signups"}},
+    {"id": 11, "request": {"method": "POST", "baseURL": "https://{TARGET}.example.com", "path": ["/graphql"],
+                           "body": {"query": "{__schema{types{name}}}"}},
+     "metadata": {"service": "graphql", "serviceName": "GraphQL Introspection"}},
+    {"id": 20, "request": {"method": "GET", "baseURL": "https://x", "path": ["/p", "/q"], "headers": [{"X": "y"}], "body": None},
+     "metadata": {"service": "custom", "serviceName": "Needs headers"}},
+]
+
+
+class MisconfigMapperTests(unittest.TestCase):
+    def test_only_plain_get_templates_are_selected(self):
+        ok, refused = misconfig.select_services(SERVICES)
+        self.assertEqual([s["id"] for s in ok], [0])
+        self.assertEqual(len(refused), 2)
+
+    def test_named_selection_refuses_unsafe_and_unknown(self):
+        ok, refused = misconfig.select_services(SERVICES, ["Atlassian", "graphql", "nope"])
+        self.assertEqual([s["id"] for s in ok], [0])
+        self.assertTrue(any("graphql" in r and "not a plain GET" in r for r in refused))
+        self.assertTrue(any("nope" in r for r in refused))
+
+    def test_arguments_never_enable_permutations_and_always_delay(self):
+        args = misconfig.build_args("acme", Path("/t"), [0, 1], 0)
+        self.assertEqual(args[args.index("-permutations") + 1], "false")
+        self.assertEqual(args[args.index("-delay") + 1], "1")
+        self.assertEqual(args[args.index("-service") + 1], "0,1")
+        self.assertNotIn("-skip-ssl", args)
+
+    def test_parse_results_vulnerable_vs_exists(self):
+        out = "\n".join([
+            "[+] noise that is not json",
+            '{"url":"https://acme.atlassian.net/secure/Signup!default.jspa","exists":true,"vulnerable":true,"serviceid":"0",'
+            '"service":{"metadata":{"service":"atlassian","serviceName":"Atlassian Jira Open Signups","description":"Open signups",'
+            '"references":["https://ref/1"]}}}',
+            '{"url":"https://acme.slack.com/","exists":true,"vulnerable":false,"serviceid":"2",'
+            '"service":{"metadata":{"service":"slack","serviceName":"Slack"}}}',
+        ])
+        findings, tenants = misconfig.parse_results(out, "acme")
+        self.assertEqual(len(findings), 1)
+        self.assertEqual((findings[0][0], findings[0][1]), ("medium", "saas-exposure:mm-0:acme"))
+        self.assertIn("https://ref/1", findings[0][5])
+        self.assertEqual(tenants, [("acme", "slack", "exists (https://acme.slack.com/)")])
+
+    def test_templates_dir_lookup(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(misconfig.find_templates_dir(str(Path(d) / "missing")) if not (Path.cwd() / "templates" / "services.json").is_file() else None)
+            (Path(d) / "services.json").write_text("[]")
+            self.assertEqual(misconfig.find_templates_dir(d), Path(d))
 
 
 if __name__ == "__main__":

@@ -175,6 +175,17 @@ PLUGINS: dict[str, Plugin] = {
         install_macos="brew install gobuster",
         install_linux="go install github.com/OJ/gobuster/v3@latest (or apt install gobuster)",
     ),
+    "misconfig-mapper": Plugin(
+        id="misconfig-mapper",
+        name="Misconfig Mapper",
+        kind=PluginKind.BINARY,
+        description="Opt-in SaaS misconfiguration checks by tenant name (phase E, GET templates only, no permutations)",
+        phases=("E",),
+        native_bin="misconfig-mapper",
+        version_args=("-h",),  # -list-services would load (and may download) templates
+        install_macos="go install github.com/intigriti/misconfig-mapper/cmd/misconfig-mapper@latest",
+        install_linux="go install github.com/intigriti/misconfig-mapper/cmd/misconfig-mapper@latest",
+    ),
     "gitleaks": Plugin(
         id="gitleaks",
         name="Gitleaks",

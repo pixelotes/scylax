@@ -91,6 +91,10 @@ class ScopeConfig:
     content_discovery: bool = False
     saas_exposure: bool = False
     saas_org_names: List[str] = field(default_factory=list)
+    use_misconfig_mapper: bool = False
+    misconfig_services: List[str] = field(default_factory=list)
+    misconfig_templates: str = ""
+    misconfig_delay_ms: int = 1000
     content_discovery_wordlist: str = ""
     content_discovery_rate: int = 20
     auto_discover_targets: bool = True
@@ -365,6 +369,10 @@ class ScopeConfig:
             ),
             saas_exposure=_as_bool(flat.get("saas_exposure_enabled")),
             saas_org_names=_split_list(flat.get("saas_exposure_org_names")),
+            use_misconfig_mapper=_as_bool(flat.get("saas_exposure_use_misconfig_mapper")),
+            misconfig_services=_split_list(flat.get("saas_exposure_misconfig_services")),
+            misconfig_templates=str(flat.get("saas_exposure_misconfig_templates") or "").strip(),
+            misconfig_delay_ms=int(flat.get("saas_exposure_misconfig_delay_ms") or 1000),
             content_discovery_wordlist=str(flat.get("content_discovery_wordlist") or "").strip(),
             content_discovery_rate=int(flat.get("content_discovery_rate") or 20),
             auto_discover_targets=auto_discover_targets,
@@ -583,7 +591,8 @@ _SCOPE_SCHEMA: dict[str, tuple[str, ...]] = {
     "cloud_posture": ("cloud_posture", "enabled", "use_prowler", "prowler"),
     "saas": ("saas_posture", "providers"),
     "intelligence": ("shodan_api_key", "shodan_key", "hibp_api_key", "hibp_key", *INTEL_KEY_FIELDS),
-    "saas_exposure": ("enabled", "org_names"),
+    "saas_exposure": ("enabled", "org_names", "use_misconfig_mapper", "misconfig_services",
+                      "misconfig_templates", "misconfig_delay_ms"),
     "content_discovery": ("content_discovery", "enabled", "wordlist", "rate",
                           "content_discovery_wordlist", "content_discovery_rate"),
     "limits": ("edge_max_rate", "nmap_max_rate", "httpx_rate", "nuclei_rate",
