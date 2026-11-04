@@ -32,6 +32,7 @@ ARG HTTPX_VERSION=latest
 ARG NUCLEI_VERSION=latest
 # Scylax calls "amass enum -passive" and "amass intel -whois": v4 still has both
 ARG AMASS_VERSION=v4.2.0
+ARG GOBUSTER_VERSION=latest
 ENV CGO_ENABLED=0 GOBIN=/out
 RUN --mount=type=cache,target=/root/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     go install -ldflags="-s -w" github.com/projectdiscovery/subfinder/v2/cmd/subfinder@${SUBFINDER_VERSION} \
