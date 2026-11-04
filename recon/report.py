@@ -2775,6 +2775,13 @@ def generate_reports(run_dir: Path | str) -> tuple[Path, Path]:
     html_path = path / "report.html"
     html_path.write_text(html_content, encoding="utf-8")
 
+    # Compact, self-contained companion for LLM analysis / report regeneration.
+    try:
+        from recon.ai_bundle import build_ai_bundle
+        build_ai_bundle(path)
+    except Exception:
+        pass  # the bundle is a convenience; never fail report generation over it
+
     return md_path, html_path
 
 

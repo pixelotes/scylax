@@ -12,6 +12,17 @@ scope_owner = "Sarah Jenkins, VP of Information Security (Contoso Ltd.)"
 authorised_by = "Sarah Jenkins, VP of Information Security (Contoso Ltd.) - 2026-11-01"
 authorisation_ref = "SEC-2026-8841"
 
+# Where runs/<scope>/<date>/ and the finding history are written. Absolute, or
+# relative to this scope file. Set it so runs land in the same place wherever you
+# launch Scylax from (e.g. a private folder next to the public checkout).
+# Leave empty to use <working directory>/runs.
+runs_dir = ""
+
+# Optional incoming webhook (Microsoft Teams or any JSON endpoint). After a run,
+# new and reappeared high/critical findings are posted to it. Also settable via
+# the SCYLAX_ALERT_WEBHOOK environment variable. Leave empty to disable alerts.
+alert_webhook = ""
+
 [targets]
 # Required: Root domains owned by the organization.
 domains = ["contoso.com", "northwindtraders.com", "fabrikam.io"]
@@ -120,6 +131,19 @@ shodan_api_key = ""
 
 # HaveIBeenPwned: enterprise domain breach and leaked account exposure audit (Phase 9).
 hibp_api_key = ""
+
+[content_discovery]
+# Phase C: content discovery (optional, opt-in). Actively checks whether paths that
+# should not be reachable are exposed — control panels, API docs (Swagger/FastAPI),
+# source control, config, backups, telemetry — plus signature-confirmed path
+# traversal. Non-intrusive: GET only, rate limited, owned hosts only. Uses gobuster
+# when available, else a native probe. Runs only when enabled here or named with -p C.
+enabled = false
+# Optional custom wordlist (absolute, or relative to this scope file). Empty = the
+# bundled curated list (recon/data/content_discovery.txt).
+wordlist = ""
+# Requests per second per host (native probe and gobuster --delay).
+rate = 20
 
 [saas]
 # Phase S: SaaS Security Posture checks (Microsoft 365 / Entra ID, GitHub, Google Workspace).

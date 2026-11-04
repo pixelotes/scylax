@@ -10,6 +10,7 @@ from recon.runner import Logger
 
 from recon.phases.active import phase3, phase4, phase4b, phase5, phase8
 from recon.phases.cloud import phaseA, phaseG, phaseW
+from recon.phases.content import phaseC
 from recon.phases.osint import phase1, phase2, phase6, phase7, phase9
 from recon.phases.saas import phaseS
 from recon.phases.triage import phaseT
@@ -30,6 +31,7 @@ PHASE_MAP: dict[str, PhaseFunc] = {
     "A": phaseA,
     "G": phaseG,
     "W": phaseW,
+    "C": phaseC,
     "S": phaseS,
     "T": phaseT,
 }
@@ -37,6 +39,7 @@ PHASE_MAP: dict[str, PhaseFunc] = {
 __all__ = [
     "PHASE_MAP",
     "PhaseFunc",
+    "phaseC",
     "phase1",
     "phase2",
     "phase3",

@@ -15,27 +15,33 @@ ARG PYTHON_VERSION=3.12
 ARG DEBIAN_RELEASE=bookworm
 # trufflehog's go.mod uses replace directives (no "go install"): take the
 # binary from its official multi-arch image instead
-ARG TRUFFLEHOG_VERSION=latest
+# Pinned versions (override with --build-arg to bump). Last verified in CI 2026-11-04.
+ARG TRUFFLEHOG_VERSION=3.99.8
+ARG GITLEAKS_VERSION=v8.30.1
 
 FROM trufflesecurity/trufflehog:${TRUFFLEHOG_VERSION} AS trufflehog
+# gitleaks: lighter secret scanner, official multi-arch image
+FROM zricethezav/gitleaks:${GITLEAKS_VERSION} AS gitleaks
 
 # ---------------------------------------------------------------------------
 # Go tools (ProjectDiscovery + amass), built for the target architecture
 # ---------------------------------------------------------------------------
 FROM golang:1-${DEBIAN_RELEASE} AS gotools
-ARG SUBFINDER_VERSION=latest
-ARG DNSX_VERSION=latest
-ARG HTTPX_VERSION=latest
-ARG NUCLEI_VERSION=latest
+ARG SUBFINDER_VERSION=v2.17.0
+ARG DNSX_VERSION=v1.3.1
+ARG HTTPX_VERSION=v1.12.0
+ARG NUCLEI_VERSION=v3.11.1
 # Scylax calls "amass enum -passive" and "amass intel -whois": v4 still has both
 ARG AMASS_VERSION=v4.2.0
+ARG GOBUSTER_VERSION=v3.8.2
 ENV CGO_ENABLED=0 GOBIN=/out
 RUN --mount=type=cache,target=/root/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     go install -ldflags="-s -w" github.com/projectdiscovery/subfinder/v2/cmd/subfinder@${SUBFINDER_VERSION} \
  && go install -ldflags="-s -w" github.com/projectdiscovery/dnsx/cmd/dnsx@${DNSX_VERSION} \
  && go install -ldflags="-s -w" github.com/projectdiscovery/httpx/cmd/httpx@${HTTPX_VERSION} \
  && go install -ldflags="-s -w" github.com/projectdiscovery/nuclei/v3/cmd/nuclei@${NUCLEI_VERSION} \
- && go install -ldflags="-s -w" github.com/owasp-amass/amass/v4/...@${AMASS_VERSION}
+ && go install -ldflags="-s -w" github.com/owasp-amass/amass/v4/...@${AMASS_VERSION} \
+ && go install -ldflags="-s -w" github.com/OJ/gobuster/v3@${GOBUSTER_VERSION}
 
 # ---------------------------------------------------------------------------
 # core: Scylax + network / OSINT tooling
@@ -57,6 +63,7 @@ RUN apt-get update \
 
 COPY --from=gotools /out/ /usr/local/bin/
 COPY --from=trufflehog /usr/bin/trufflehog /usr/local/bin/trufflehog
+COPY --from=gitleaks /usr/bin/gitleaks /usr/local/bin/gitleaks
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Python tools live in their own virtualenvs, each with the Python it needs

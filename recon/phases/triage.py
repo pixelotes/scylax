@@ -12,9 +12,11 @@ from recon.config import RunContext
 from recon.deps import DependencyManager
 from recon.report import generate_reports, nsg_ports
 from recon.webprobe import is_hash_label, is_ingress_default_404
+from recon import notify
 from recon.runner import (
     Logger,
     http_get,
+    load_tool_failures,
     record_virtual_cmd,
     ver_lt,
 )
@@ -232,6 +234,48 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
             if h and re.search(r"^[^.]*internal", h, re.IGNORECASE):
                 add("medium", f"internal-name:{h}", "Internal-named host publicly resolvable", h)
 
+    traversal_file = ctx.web_dir / "path_traversal.tsv"
+    if traversal_file.is_file():
+        for line in traversal_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            parts = line.strip().split("\t")
+            if len(parts) >= 2:
+                url, target = parts[0].strip(), parts[1].strip()
+                snippet = parts[2].strip() if len(parts) > 2 else ""
+                add("high", f"traversal:{url}", "Path traversal / local file inclusion confirmed",
+                    f"{url} -> {target} ({snippet})", target=url)
+
+    content_file = ctx.web_dir / "content_discovery.tsv"
+    if content_file.is_file():
+        for line in content_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            parts = line.strip().split("\t")
+            if len(parts) >= 4:
+                url, status, size, cat = (x.strip() for x in parts[:4])
+                add(cat, f"content-disc:{url}",
+                    f"Exposed path reachable (HTTP {status})", f"{url} [{status}, {size} bytes]", target=url)
+
+    secret_leaks_file = ctx.osint_dir / "secret_leaks.tsv"
+    if secret_leaks_file.is_file():
+        for line in secret_leaks_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            parts = line.strip().split("\t")
+            if len(parts) >= 4:
+                repo, loc, detector, verified = (x.strip() for x in parts[:4])
+                sev = "high" if verified == "verified" else "medium"
+                add(sev, f"secret-leak:{repo}:{loc}:{detector}",
+                    f"Secret leaked in public repo ({detector}" + (", verified)" if verified == "verified" else ")"),
+                    f"{repo} {loc}")
+
+    takeover_file = ctx.osint_dir / "takeover_candidates.tsv"
+    if takeover_file.is_file():
+        for line in takeover_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            parts = line.strip().split("\t")
+            if len(parts) >= 5:
+                host, cname, service, sev, reason = (x.strip() for x in parts[:5])
+                evidence = parts[5].strip() if len(parts) > 5 else ""
+                detail = f"{host} -> {cname} ({service}); {reason}"
+                if evidence:
+                    detail += f"; fingerprint: {evidence}"
+                add(sev, f"takeover:{host}", f"Possible subdomain takeover ({service})", detail, target=host)
+
     dirlist_file = ctx.web_dir / "dir_listings.txt"
     if dirlist_file.is_file():
         for line in dirlist_file.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -243,6 +287,15 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     # ------------------------------------------------------------------
     # 5. Exposed Paths, CORS/Cookies, Entry Points
     # ------------------------------------------------------------------
+    sensitive_file = ctx.web_dir / "sensitive_paths.tsv"
+    if sensitive_file.is_file():
+        for line in sensitive_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            parts = line.strip().split("\t")
+            if len(parts) >= 4:
+                url, category, sev, title = (x.strip() for x in parts[:4])
+                snippet = parts[4].strip() if len(parts) > 4 else ""
+                add(sev, f"sensitive-path:{url}", title, f"{url} ({category}: {snippet})", target=url)
+
     exposed_file = ctx.web_dir / "exposed_paths.tsv"
     if exposed_file.is_file():
         for line in exposed_file.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -963,7 +1016,15 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     curr_map: dict[str, tuple[str, str, str, str]] = {}
     for item in deduped:
         curr_map.setdefault(item[1], item)
+    history_path = ctx.runs_root / ctx.scope.name / "findings_history.json"
+    had_history = history_path.is_file()
     history = _update_history(ctx, curr_map)
+
+    if ctx.prev_run_dir is None and had_history:
+        log.warn(
+            f"no previous run directory under {ctx.runs_root / ctx.scope.name} but a finding "
+            f"history exists - the diff is skipped; is runs_dir / the working directory correct?"
+        )
 
     if ctx.prev_run_dir is not None and (ctx.prev_run_dir / "findings_auto.tsv").is_file():
         prev_tsv = ctx.prev_run_dir / "findings_auto.tsv"
@@ -978,7 +1039,12 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         prev_keys = set(prev_map)
         curr_keys = set(curr_map)
 
+        failed_tools = {tool for _, tool, _ in load_tool_failures(ctx.run_dir)}
+
         def _checked_in_both(key: str) -> bool:
+            # The tool that reports it failed this time: absence proves nothing
+            if any(t in failed_tools for t in finding_tools(key)):
+                return False
             ph = finding_phase(key)
             # Unknown origin, or run.meta missing: assume it was checked
             return ph is None or not curr_phases or not prev_phases or (ph in curr_phases and ph in prev_phases)
@@ -1008,7 +1074,7 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
             diff_lines.append(f"## {section_name} ({len(keys)})")
             diff_lines.append("")
             if section_name == "Not re-checked" and keys:
-                diff_lines.append("_The phase that produces these was not run this time; status unknown._")
+                diff_lines.append("_The phase or tool that produces these did not run (or failed) this time; status unknown._")
                 diff_lines.append("")
             for k in sorted(keys, key=lambda x: (SEVERITY_ORDER.get(src[x][0], 99), x)):
                 f_item = src[k]
@@ -1016,6 +1082,16 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
         (ctx.run_dir / "diff.md").write_text("\n".join(diff_lines) + "\n", encoding="utf-8")
         log.ok(f"diff vs {ctx.prev_run_dir.name} in diff.md")
+
+        # Alert on new / reappeared high and critical findings
+        alert_keys = [k for k in (new_keys + reappeared_keys)
+                      if curr_map[k][0] in ("critical", "high")]
+        if alert_keys and notify.webhook_url(ctx.scope):
+            alert_findings = [curr_map[k] for k in sorted(
+                alert_keys, key=lambda x: (SEVERITY_ORDER.get(curr_map[x][0], 99), x))]
+            _, msg = notify.post_new_findings(
+                ctx.scope, ctx.scope.name, ctx.run_date, alert_findings)
+            log.info(f"Alert: {msg}")
 
     record_virtual_cmd(
         console_dir=ctx.console_dir,
@@ -1042,8 +1118,32 @@ _PHASE_BY_PREFIX: tuple[tuple[str, str], ...] = (
     ("routeros:", "4"), ("fakecert:", "4"), ("fw-admin:", "4"), ("cert-expired:", "4"), ("502:", "4"),
     ("entrypoint:", "6"), ("wayback-", "6"),
     ("cve-", "7"),
-    ("nuclei:", "8"),
+    ("nuclei:", "8"), ("sensitive-path:", "8"),
+    ("takeover:", "2"),
+    ("secret-leak:", "9"),
+    ("content-disc:", "C"), ("traversal:", "C"),
 )
+
+
+# Which external tools produce each finding key. If one of them failed in the
+# current run (tool_failures.tsv), a missing finding is "not re-checked".
+_TOOLS_BY_PREFIX: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("nuclei:", ("nuclei",)),
+    ("secret-leak:", ("gitleaks", "trufflehog", "git")),
+    ("content-disc:", ("gobuster",)),
+    ("traversal:", ("gobuster",)),
+    ("takeover:", ("dig",)),
+    ("mgmt:", ("nmap",)), ("ssh:", ("nmap",)), ("ssh-weak:", ("nmap",)), ("apache:", ("nmap",)),
+    ("nginx:", ("nmap",)), ("routeros:", ("nmap",)), ("fakecert:", ("nmap",)), ("fw-admin:", ("nmap",)),
+    ("cert-expired:", ("nmap",)), ("cve-", ("nmap",)),
+)
+
+
+def finding_tools(key: str) -> tuple[str, ...]:
+    for prefix, tools in _TOOLS_BY_PREFIX:
+        if key.startswith(prefix):
+            return tools
+    return ()
 
 
 def finding_phase(key: str) -> str | None:
@@ -1070,7 +1170,7 @@ def _run_phases(run_dir: Path) -> set[str]:
 def _update_history(ctx: RunContext, curr_map: dict[str, tuple[str, str, str, str]]) -> dict[str, dict]:
     """Record in runs/<scope>/findings_history.json the run dates each finding
     key was seen on, so persisting and reappearing findings can be aged."""
-    path = ctx.root / "runs" / ctx.scope.name / "findings_history.json"
+    path = ctx.runs_root / ctx.scope.name / "findings_history.json"
     try:
         history = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
     except (json.JSONDecodeError, OSError):
@@ -1095,7 +1195,7 @@ def _update_history(ctx: RunContext, curr_map: dict[str, tuple[str, str, str, st
 # instead of as a directory listing + data file + API docs + hashed name.
 _IP_KEY_PREFIXES = ("502:", "apache:", "cert-expired:", "fakecert:", "fw-admin:", "nginx:",
                     "routeros:", "ssh:", "ssh-weak:")
-_URL_KEY_PREFIXES = ("cookie:", "cors:", "dirlist:", "exposed-api:", "exposed-path:", "robots:")
+_URL_KEY_PREFIXES = ("cookie:", "cors:", "dirlist:", "exposed-api:", "exposed-path:", "robots:", "sensitive-path:", "content-disc:", "traversal:")
 _HOST_KEY_PREFIXES = ("api-data:", "data-export:", "hash-host:")
 _DOMAIN_KEY_PREFIXES = ("apex:", "axfr:", "caa:", "dmarc:", "dnssec:", "spf:", "whois:", "wildcard:",
                         "internal-name:")
@@ -1127,7 +1227,7 @@ def finding_target(key: str) -> str:
     return ""
 
 
-_HOST_FOLD_PREFIXES = ("api-data:", "data-export:", "exposed-path:", "dirlist:", "exposed-api:", "hash-host:")
+_HOST_FOLD_PREFIXES = ("api-data:", "data-export:", "exposed-path:", "dirlist:", "exposed-api:", "hash-host:", "sensitive-path:", "content-disc:", "traversal:")
 
 
 def _fold_host(key: str) -> str | None:

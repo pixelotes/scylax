@@ -94,7 +94,8 @@ class TestActivePhasesScope(unittest.TestCase):
                 "https://intranet.example.com [200] [] [] []\n",
                 encoding="utf-8",
             )
-            with mock.patch.object(active, "ev"):
+            with mock.patch.object(active, "ev"), \
+                    mock.patch.object(active, "_sensitive_path_fallback"):
                 active.phase8(ctx, self._dm(), Logger(ctx.run_dir / "log.txt"))
             targets = (ctx.web_dir / "nuclei_targets.txt").read_text().split()
             self.assertEqual(sorted(targets), ["https://93.184.216.34", "https://app.example.com"])

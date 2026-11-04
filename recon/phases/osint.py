@@ -18,6 +18,7 @@ import os
 import pathlib
 import random
 import re
+import socket
 import time
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -31,11 +32,13 @@ from recon.runner import (
     ev,
     http_get,
     http_get_json,
+    record_tool_failure,
     record_virtual_cmd,
     run_cmd,
 )
 from recon.nvd import cpe_to_23, load_kev_ids, nvd_cves_for_cpe
 from recon.scope import ScopeGuard
+from recon.takeover import check_takeover
 from recon.webprobe import is_hash_label
 
 
@@ -237,6 +240,7 @@ def phase2(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     re_ipv4 = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
     ip_host_pairs: list[tuple[str, str]] = []
     resolved_hosts: set[str] = set()
+    cname_map: dict[str, list[str]] = {}
 
     if dm.is_available("dnsx"):
         cmd = dm.build_cmd(
@@ -255,6 +259,9 @@ def phase2(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 continue
             host = obj.get("host", "")
             a_list = obj.get("a", [])
+            cname_list = obj.get("cname") or []
+            if host and cname_list:
+                cname_map[host] = [str(c).strip() for c in cname_list if c]
             if host and a_list:
                 for ip in a_list:
                     ip_str = str(ip).strip()
@@ -292,6 +299,36 @@ def phase2(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
             f.write(f"{count:7d} {ip}\n")
 
     log.ok(f"{len(sorted_resolved)} resolving names on {len(sorted_ip_counts)} IPs")
+
+    # Subdomain takeover: dangling CNAMEs pointing to unclaimed services or to
+    # internal names that no longer resolve.
+    def _resolves(name: str) -> bool:
+        try:
+            socket.getaddrinfo(name, None)
+            return True
+        except (socket.gaierror, UnicodeError, OSError):
+            return False
+
+    internal_suffixes = tuple(ctx.scope.domains)
+    takeover_rows: list[str] = []
+    for host, cnames in sorted(cname_map.items()):
+        for cname in cnames:
+            cand = check_takeover(
+                host, cname,
+                cname_resolves=_resolves(cname.rstrip(".")),
+                http_get=http_get,
+                internal_suffixes=internal_suffixes,
+            )
+            if cand is not None:
+                takeover_rows.append(
+                    f"{cand.host}\t{cand.cname}\t{cand.service}\t{cand.severity}\t{cand.reason}\t{cand.evidence}"
+                )
+                break  # one finding per host is enough
+    (ctx.osint_dir / "takeover_candidates.tsv").write_text(
+        "".join(f"{r}\n" for r in takeover_rows), encoding="utf-8"
+    )
+    if takeover_rows:
+        log.warn(f"{len(takeover_rows)} possible subdomain takeover(s) in osint/takeover_candidates.tsv")
 
     # Clear apex.txt
     (ctx.osint_dir / "apex.txt").write_text("", encoding="utf-8")
@@ -1446,6 +1483,123 @@ def run_hibp_breaches(
     return domain_breaches, account_breaches
 
 
+MAX_REPOS_TO_SCAN = 30
+
+
+def _scan_public_repos(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
+    """Scan the GitHub organization's public repos for leaked secrets.
+
+    Prefers gitleaks (lighter: a shallow clone's working tree) and falls back to
+    TruffleHog (remote git history, verified secrets only). Writes
+    osint/secret_leaks.tsv. Skipped silently when no org or no scanner is set."""
+    org = os.environ.get("GITHUB_ORG", "").strip()
+    if not org or not dm.is_available("gh"):
+        return
+    use_gitleaks = dm.is_available("gitleaks")
+    use_trufflehog = dm.is_available("trufflehog")
+    if not (use_gitleaks or use_trufflehog):
+        return
+    if run_cmd(dm.build_cmd("gh", ["auth", "status"]), timeout=10).returncode != 0:
+        return
+
+    repos_res = ev(
+        ctx.console_dir, "9",
+        dm.build_cmd("gh", ["api", "--paginate",
+                            f"/orgs/{org}/repos?type=public&per_page=100"]),
+        timeout=120, title=f"list public repos ({org})",
+    )
+    try:
+        data = _parse_json_stream_osint(repos_res.stdout)
+    except Exception:
+        data = None
+    repos = [
+        r for r in (data or [])
+        if isinstance(r, dict) and not r.get("archived") and not r.get("fork")
+        and r.get("clone_url")
+    ]
+    if not repos:
+        return
+    repos.sort(key=lambda r: str(r.get("pushed_at") or ""), reverse=True)
+    capped = repos[:MAX_REPOS_TO_SCAN]
+    scanner = "gitleaks" if use_gitleaks else "trufflehog"
+    log.info(f"Secret scan: {scanner} over {len(capped)} public repo(s) of {org}"
+             + (f" (capped from {len(repos)})" if len(repos) > MAX_REPOS_TO_SCAN else ""))
+
+    rows: list[str] = []
+    import tempfile
+    for repo in capped:
+        name = str(repo.get("name"))
+        clone_url = str(repo.get("clone_url"))
+        if use_gitleaks:
+            with tempfile.TemporaryDirectory() as td:
+                clone = run_cmd(["git", "clone", "--depth", "1", "--quiet", clone_url, td], timeout=180)
+                if clone.returncode != 0:
+                    record_tool_failure(ctx.run_dir, "9", "git", f"clone {name} failed")
+                    continue
+                report = Path(td) / "_gitleaks.json"
+                res = ev(
+                    ctx.console_dir, "9",
+                    dm.build_cmd("gitleaks", ["dir", td, "--report-format", "json",
+                                              "--report-path", str(report), "--exit-code", "0"]),
+                    timeout=300, title=f"gitleaks {name}",
+                )
+                if report.is_file():
+                    try:
+                        for item in json.loads(report.read_text(encoding="utf-8", errors="replace")) or []:
+                            loc = f"{item.get('File', '?')}:{item.get('StartLine', '?')}"
+                            rows.append(f"{name}\t{loc}\t{item.get('RuleID', 'secret')}\tunverified")
+                    except Exception:
+                        pass
+        else:
+            res = ev(
+                ctx.console_dir, "9",
+                dm.build_cmd("trufflehog", ["git", clone_url, "--only-verified", "--json", "--no-update"]),
+                timeout=300, title=f"trufflehog {name}",
+            )
+            for line in res.stdout.splitlines():
+                line = line.strip()
+                if not line.startswith("{"):
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                git = ((obj.get("SourceMetadata") or {}).get("Data") or {}).get("Git") or {}
+                loc = f"{git.get('file', '?')}@{str(git.get('commit', ''))[:10]}"
+                rows.append(f"{name}\t{loc}\t{obj.get('DetectorName', 'secret')}\tverified")
+
+    (ctx.osint_dir / "secret_leaks.tsv").write_text("".join(f"{r}\n" for r in rows), encoding="utf-8")
+    if rows:
+        log.warn(f"{len(rows)} potential secret(s) in public repos - osint/secret_leaks.tsv")
+    else:
+        log.ok(f"Secret scan: no secrets found in {len(capped)} public repo(s)")
+
+
+def _parse_json_stream_osint(raw: str) -> Any:
+    """Parse one or more concatenated JSON values (gh --paginate), flattening lists."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    dec = json.JSONDecoder()
+    pos, out = 0, []
+    while pos < len(raw):
+        while pos < len(raw) and raw[pos].isspace():
+            pos += 1
+        if pos >= len(raw):
+            break
+        try:
+            obj, pos = dec.raw_decode(raw, pos)
+        except json.JSONDecodeError:
+            break
+        out.append(obj)
+    if len(out) == 1:
+        return out[0]
+    flat: list[Any] = []
+    for o in out:
+        flat.extend(o if isinstance(o, list) else [o])
+    return flat
+
+
 def phase9(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     """Phase 9 - secret scanning, email enumeration & breach intelligence."""
     log.info("Phase 9 - secret scanning, email enumeration & breach intelligence")
@@ -1476,6 +1630,9 @@ Public GitHub code search (after gh auth login):
                 )
         else:
             log.warn("gh not authenticated - public code-leak search not run")
+
+    # 0b. Scan the organization's public repositories for leaked secrets
+    _scan_public_repos(ctx, dm, log)
 
     # 1. Enumerate corporate emails via theHarvester, amass, spiderfoot, and passive sources
     emails = run_email_enumeration(ctx, dm, log)
