@@ -357,6 +357,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if any(p != "T" for p in ctx.phases) and log.gaps_file.is_file():
         log.gaps_file.unlink()
 
+    # API plugins are detected through their environment variables: expose keys
+    # that came from the scope file or the command line the same way.
+    for var, value in (("SHODAN_API_KEY", ctx.shodan_api_key), ("HIBP_API_KEY", ctx.hibp_api_key)):
+        if value and not os.environ.get(var, "").strip():
+            os.environ[var] = value
+
     dm = DependencyManager(use_docker=ctx.use_docker, run_dir=ctx.run_dir)
     preflight(ctx, dm, log)
 

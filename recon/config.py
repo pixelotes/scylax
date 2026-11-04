@@ -107,18 +107,31 @@ class ScopeConfig:
     def ownership_enforced(self) -> bool:
         return bool(self.owned_ranges or self.owned_ips_file)
 
+    def resolve_file(self, f: str) -> Path | None:
+        """Find a file named in the scope, wherever the run is started from.
+
+        Tried in order: as given (absolute or relative to the working directory),
+        next to the scope file, and relative to the scope folder's parent, so
+        "scopes/x.txt" works for scopes/<name>.toml from any directory."""
+        if not f:
+            return None
+        p = Path(f).expanduser()
+        if p.is_absolute():
+            return p if p.is_file() else None
+        here = self.path.resolve().parent
+        for cand in (p, here / p, here.parent / p, here / p.name):
+            if cand.is_file():
+                return cand
+        return None
+
     def owned_entries(self) -> List[str]:
         """IPs/CIDRs we own: owned_ranges, hvt/edge IPs, and the first column of
         owned_ips_file and any cloud inventory file ('#' starts a comment)."""
         entries = list(self.owned_ranges) + list(self.hvt_ips) + list(self.edge_ips)
         for f in (self.owned_ips_file, self.azure_inventory_file,
                   self.gcp_inventory_file, self.aws_inventory_file):
-            if not f:
-                continue
-            p = Path(f)
-            if not p.is_absolute() and not p.is_file():
-                p = self.path.parent / p
-            if p.is_file():
+            p = self.resolve_file(f)
+            if p is not None:
                 for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
                     tok = re.split(r"[\s,;]+", line.split("#", 1)[0].strip())[0]
                     if tok:
@@ -301,7 +314,7 @@ class ScopeConfig:
         else:
             saas_providers = ["m365", "github", "google"]
 
-        return cls(
+        scope = cls(
             path=path,
             name=name,
             engagement=str(flat.get("engagement") or name),
@@ -344,6 +357,14 @@ class ScopeConfig:
             min_nginx=str(flat.get("min_nginx", "1.26.0")),
             min_routeros=str(flat.get("min_routeros", "7.15")),
         )
+        # A missing allowlist file would silently shrink the ownership allowlist
+        # to hvt/edge IPs and skip every other owned asset: refuse to run instead.
+        if scope.owned_ips_file and scope.resolve_file(scope.owned_ips_file) is None:
+            raise ValueError(
+                f"{path}: owned_ips_file not found: {scope.owned_ips_file} "
+                f"(looked in the working directory, next to the scope file and in its parent)"
+            )
+        return scope
 
 
 @dataclass
