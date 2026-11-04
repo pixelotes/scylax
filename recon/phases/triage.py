@@ -53,11 +53,16 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
     candidates: list[tuple[str, str, str, str]] = []
     key_index: dict[str, int] = {}
+    targets: dict[str, str] = {}
 
-    def add(severity: str, key: str, title: str, evidence: str) -> None:
-        """One candidate per rule key; extra evidence (e.g. other ports) is merged."""
+    def add(severity: str, key: str, title: str, evidence: str, target: str = "") -> None:
+        """One candidate per rule key; extra evidence (e.g. other ports) is merged.
+
+        target is the IP / URL to look at; when empty it is derived from the key."""
         key = key.strip()
         evidence = evidence.strip()
+        if target and key not in targets:
+            targets[key] = target.strip()
         if key in key_index:
             i = key_index[key]
             sev0, _, title0, ev0 = candidates[i]
@@ -660,6 +665,15 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         re.IGNORECASE,
     )
 
+    # Public IP per NIC ("networkInterfaces/<nic>" in public_ips.tsv), to point NSG findings at an address.
+    azure_nic_ips: dict[str, str] = {}
+    azure_ips_file = ctx.azure_dir / "public_ips.tsv"
+    if azure_ips_file.is_file():
+        for line in azure_ips_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            parts = line.strip().split("\t")
+            if len(parts) >= 4 and parts[3].startswith("networkInterfaces/"):
+                azure_nic_ips.setdefault(parts[3].split("/", 1)[1], parts[0].strip())
+
     azure_nsg_file = ctx.azure_dir / "nsg_internet_rules.tsv"
     if azure_nsg_file.is_file():
         for line in azure_nsg_file.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -668,14 +682,18 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 nsg = parts[0].strip()
                 rg = parts[1].strip()
                 rule = parts[2].strip()
-                ports = parts[3].strip()
+                ports = _nsg_ports(parts[3])
                 nics = parts[4].strip() if len(parts) > 4 else "0"
+                nic_names = [n for n in (parts[5].split(",") if len(parts) > 5 else []) if n]
+                nsg_id = parts[6].strip() if len(parts) > 6 else ""
                 if SENSITIVE_PORTS_RE.search(ports):
+                    ips = [azure_nic_ips[n] for n in nic_names if n in azure_nic_ips]
                     add(
                         "medium",
                         f"nsg:{nsg}:{rule}",
                         f"Azure NSG allows {ports} from Internet",
                         f"{rg}/{nsg} rule {rule} (nics: {nics})",
+                        target=", ".join(ips) or (f"https://portal.azure.com/#@/resource{nsg_id}" if nsg_id else ""),
                     )
 
     gcp_fw_file = ctx.gcp_dir / "firewall_internet_rules.tsv"
@@ -694,6 +712,7 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                         f"gcp-fw:{project}:{name}",
                         f"GCP VPC firewall allows {ports} from Internet",
                         f"{project}/{network} rule {name} (tags: {tags})",
+                        target=f"https://console.cloud.google.com/net-security/firewall-manager/firewall-policies/details/{name}?project={project}",
                     )
 
     aws_sg_file = ctx.aws_dir / "sg_internet_rules.tsv"
@@ -712,6 +731,7 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                         f"aws-sg:{gid}",
                         f"AWS Security Group allows {ports} from Internet",
                         f"{gname} ({gid}) in {reg} (cidr: {cidr})",
+                        target=f"https://console.aws.amazon.com/ec2/home?region={reg}#SecurityGroup:groupId={gid}",
                     )
 
     # ------------------------------------------------------------------
@@ -900,7 +920,10 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     deduped.sort(key=lambda x: (SEVERITY_ORDER.get(x[0], 99), x[1], x[2]))
 
     # Write findings_auto.tsv
-    tsv_lines = [f"{sev}\t{key}\t{title}\t{ev}\n" for sev, key, title, ev in deduped]
+    def target_of(key: str) -> str:
+        return targets.get(key) or finding_target(key)
+
+    tsv_lines = [f"{sev}\t{key}\t{title}\t{ev}\t{target_of(key)}\n" for sev, key, title, ev in deduped]
     (ctx.run_dir / "findings_auto.tsv").write_text("".join(tsv_lines), encoding="utf-8")
 
     # Write findings_auto.md
@@ -909,13 +932,14 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         "",
         "Validate every line by hand before it goes into the report.",
         "",
-        "| Severity | Finding | Evidence | Key |",
-        "|---|---|---|---|",
+        "| Severity | Finding | Target | Evidence | Key |",
+        "|---|---|---|---|---|",
     ]
     for sev, key, title, ev in deduped:
         esc_title = title.replace("|", "\\|")
         esc_ev = ev.replace("|", "\\|")
-        md_lines.append(f"| {sev} | {esc_title} | {esc_ev} | `{key}` |")
+        esc_target = target_of(key).replace("|", "\\|")
+        md_lines.append(f"| {sev} | {esc_title} | {esc_target} | {esc_ev} | `{key}` |")
 
     gaps_file = ctx.run_dir / "gaps.txt"
     if gaps_file.is_file():
@@ -1068,6 +1092,56 @@ def _update_history(ctx: RunContext, curr_map: dict[str, tuple[str, str, str, st
 # Web findings about the same host are folded into its most severe one, so a
 # single exposed service shows up once (with the rest as supporting evidence)
 # instead of as a directory listing + data file + API docs + hashed name.
+_IP_KEY_PREFIXES = ("502:", "apache:", "cert-expired:", "fakecert:", "fw-admin:", "nginx:",
+                    "routeros:", "ssh:", "ssh-weak:")
+_URL_KEY_PREFIXES = ("cookie:", "cors:", "dirlist:", "exposed-api:", "exposed-path:", "robots:")
+_HOST_KEY_PREFIXES = ("api-data:", "data-export:", "hash-host:")
+_DOMAIN_KEY_PREFIXES = ("apex:", "axfr:", "caa:", "dmarc:", "dnssec:", "spf:", "whois:", "wildcard:",
+                        "internal-name:")
+
+
+def _nsg_ports(raw: str) -> str:
+    """NSG port field as '22' or '443,80'.
+
+    Runs before the fix stored destinationPortRange glued to the JSON text of
+    destinationPortRanges ('22[]', '["443","80"]')."""
+    raw = raw.strip()
+    if "[" not in raw:
+        return raw
+    single, _, rest = raw.partition("[")
+    try:
+        ranges = [str(x) for x in json.loads("[" + rest) if x]
+    except ValueError:
+        ranges = []
+    return ",".join([single] if single else ranges)
+
+
+def finding_target(key: str) -> str:
+    """The IP, host:port or URL a finding is about, derived from its rule key.
+
+    Breach findings point at a public lookup: the account's XposedOrNot query
+    or the breach's HIBP catalogue entry. '' when the key names no resource."""
+    prefix, _, rest = key.partition(":")
+    prefix += ":"
+    if prefix in _IP_KEY_PREFIXES or prefix in _DOMAIN_KEY_PREFIXES:
+        return rest
+    if prefix in _URL_KEY_PREFIXES:
+        return rest
+    if prefix in _HOST_KEY_PREFIXES:
+        return f"https://{rest}/"
+    if prefix in ("mgmt:", "cve-kev:", "cve-high:"):
+        return rest  # ip:port
+    if prefix == "nuclei:":
+        return rest.split(":", 1)[1] if ":" in rest else rest
+    if prefix == "hibp-account:":
+        email = rest.rsplit(":", 1)[0]
+        return f"https://api.xposedornot.com/v1/check-email/{urllib.parse.quote(email)}"
+    if prefix == "hibp:":
+        breach = rest.rsplit(":", 1)[-1]
+        return f"https://haveibeenpwned.com/PwnedWebsites#{urllib.parse.quote(breach)}"
+    return ""
+
+
 _HOST_FOLD_PREFIXES = ("api-data:", "data-export:", "exposed-path:", "dirlist:", "exposed-api:", "hash-host:")
 
 

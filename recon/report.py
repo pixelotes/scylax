@@ -112,6 +112,20 @@ def _escape_md_cell(text: str) -> str:
     return text.replace("|", "\\|").replace("\r", "").replace("\n", " ")
 
 
+def _target_html(target: str) -> str:
+    """Finding target cell: URLs become links, anything else stays as code."""
+    if not target:
+        return "-"
+    out = []
+    for t in (x.strip() for x in target.split(", ")):
+        esc = html.escape(t)
+        if t.startswith(("http://", "https://")):
+            out.append(f'<a href="{esc}" target="_blank" rel="noopener noreferrer">{esc}</a>')
+        else:
+            out.append(f"<code>{esc}</code>")
+    return "<br>".join(out)
+
+
 # =====================================================================
 # Data Loader
 # =====================================================================
@@ -197,6 +211,7 @@ class RunData:
                     "key": parts[1].strip(),
                     "title": parts[2].strip(),
                     "evidence": parts[3].strip(),
+                    "target": parts[4].strip() if len(parts) > 4 else "",
                 })
             elif len(parts) >= 2:
                 sev = parts[0].strip().upper()
@@ -205,6 +220,7 @@ class RunData:
                     "key": parts[1].strip(),
                     "title": parts[2].strip() if len(parts) > 2 else parts[1].strip(),
                     "evidence": parts[3].strip() if len(parts) > 3 else "",
+                    "target": "",
                 })
 
         findings.sort(key=lambda f: (order_map.get(f["severity"], 99), f["title"].lower()))
@@ -805,14 +821,15 @@ def generate_markdown(data: RunData) -> str:
     lines.append("")
     lines.append("*All findings are automated candidates to validate through manual review, not definitive penetration test conclusions.*\n")
     if data.findings:
-        lines.append("| Severity | Finding Title | Evidence | Rule Key |")
-        lines.append("|---|---|---|---|")
+        lines.append("| Severity | Finding Title | Target | Evidence | Rule Key |")
+        lines.append("|---|---|---|---|---|")
         for f in data.findings:
             sev_badge = f"`{f['severity']}`"
             title = _escape_md_cell(f["title"])
             evidence = _escape_md_cell(f["evidence"])
             key = f"`{_escape_md_cell(f['key'])}`" if f["key"] else "-"
-            lines.append(f"| {sev_badge} | {title} | `{evidence}` | {key} |")
+            target = _escape_md_cell(f.get("target", "")) or "-"
+            lines.append(f"| {sev_badge} | {title} | {target} | `{evidence}` | {key} |")
     else:
         lines.append("*No automated finding candidates identified for this run.*")
     lines.append("")
@@ -1845,7 +1862,7 @@ def generate_html(data: RunData) -> str:
             <button class="filter-pill" data-filter="LOW">Low ({k['low']})</button>
             <button class="filter-pill" data-filter="INFO">Info ({k['info']})</button>
           </div>
-          <input type="text" class="search-input" id="finding-search-input" placeholder="Search title, key, evidence...">
+          <input type="text" class="search-input" id="finding-search-input" placeholder="Search title, target, key, evidence...">
         </div>
 
         <div class="table-responsive">
@@ -1854,17 +1871,19 @@ def generate_html(data: RunData) -> str:
               <tr>
                 <th style="width: 110px;">Severity</th>
                 <th>Finding Title</th>
+                <th>Target</th>
                 <th>Affected Asset / Evidence</th>
                 <th style="width: 220px;">Rule Key</th>
               </tr>
             </thead>
             <tbody>
-              {"".join(f'''<tr class="finding-row" data-severity="{f['severity']}" data-text="{html.escape(f['title'].lower())} {html.escape(f['key'].lower())} {html.escape(f['evidence'].lower())}">
+              {"".join(f'''<tr class="finding-row" data-severity="{f['severity']}" data-text="{html.escape(f['title'].lower())} {html.escape(f.get('target', '').lower())} {html.escape(f['key'].lower())} {html.escape(f['evidence'].lower())}">
                 <td><span class="badge badge-{f['severity'].lower()}">{f['severity']}</span></td>
                 <td><strong>{html.escape(f['title'])}</strong></td>
+                <td class="mono">{_target_html(f.get('target', ''))}</td>
                 <td class="mono"><code>{html.escape(f['evidence'])}</code></td>
                 <td><code class="pill">{html.escape(f['key'])}</code></td>
-              </tr>''' for f in data.findings) if data.findings else "<tr><td colspan='4' class='empty-state'>No candidate findings identified</td></tr>"}
+              </tr>''' for f in data.findings) if data.findings else "<tr><td colspan='5' class='empty-state'>No candidate findings identified</td></tr>"}
             </tbody>
           </table>
           <div id="findings-no-results" class="empty-state" style="display: none;">No findings match your filter criteria.</div>

@@ -60,6 +60,28 @@ class TestTriageRules(unittest.TestCase):
             rows = (ctx.run_dir / "findings_auto.tsv").read_text().splitlines()
             return [r.split("\t") for r in rows]
 
+    def test_target_column(self) -> None:
+        def setup(ctx):
+            ctx.azure_dir.mkdir(parents=True, exist_ok=True)
+            (ctx.azure_dir / "public_ips.tsv").write_text(
+                "93.184.216.34\tvm-runner-ip\trg-ci\tnetworkInterfaces/vm-runner-nic\n", encoding="utf-8")
+            (ctx.azure_dir / "nsg_internet_rules.tsv").write_text(
+                "runner-nsg\trg-ci\tallow-ssh\t22\t1\tvm-runner-nic\t/subscriptions/x/nsg/runner-nsg\n"
+                "other-nsg\trg-ci\tallow-rdp\t3389\t0\t\t/subscriptions/x/nsg/other-nsg\n",
+                encoding="utf-8")
+            (ctx.osint_dir / "hibp_account_breaches.tsv").write_text(
+                "email\tname\ttitle\tbreach_date\tpwn_count\tdata_classes\tis_verified\tis_sensitive\n"
+                "jdoe@example.com\tPeopleDataLabs\tPeopleDataLabs\t\t0\t\tFalse\tFalse\n",
+                encoding="utf-8")
+        rows = {r[1]: r for r in self._run(setup)}
+        self.assertEqual(rows["nsg:runner-nsg:allow-ssh"][4], "93.184.216.34")
+        self.assertEqual(rows["nsg:other-nsg:allow-rdp"][4],
+                         "https://portal.azure.com/#@/resource/subscriptions/x/nsg/other-nsg")
+        breach = rows["hibp-account:jdoe@example.com:PeopleDataLabs"]
+        self.assertEqual(breach[4], "https://api.xposedornot.com/v1/check-email/jdoe%40example.com")
+        self.assertIn("date unknown", breach[2])
+        self.assertIn("unknown", breach[3])
+
     def test_mgmt_ui_and_dedupe(self) -> None:
         def setup(ctx):
             (ctx.scan_dir / "svc_203.0.113.5.nmap").write_text(
