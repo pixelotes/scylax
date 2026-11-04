@@ -171,6 +171,65 @@ def reset_phase_console(console_dir: Path, phase: str) -> None:
     jsonl_path.write_text("".join(f"{l}\n" for l in kept), encoding="utf-8")
 
 
+TOOL_FAILURES_FILE = "tool_failures.tsv"
+
+# Failures of the tool itself, as opposed to a tool that ran and found nothing:
+# missing binary, Docker daemon down, timeout. These must never pass silently,
+# or a finding that could not be re-checked would look resolved.
+_INFRA_FAILURE_RE = re.compile(
+    r"Cannot connect to the Docker daemon|docker daemon is not running|executable file not found"
+    r"|command not found|No such file or directory: '|Unable to find image",
+    re.IGNORECASE,
+)
+
+
+def tool_name(args: Sequence[str]) -> str:
+    """Short tool name for a command line, looking through 'docker run ... image'."""
+    parts = [str(a) for a in args]
+    if not parts:
+        return "?"
+    if Path(parts[0]).name == "docker" and "run" in parts:
+        for a in parts[parts.index("run") + 1:]:
+            if not a.startswith("-") and ("/" in a or ":" in a) and not a.startswith(("/", ".")) and "=" not in a:
+                return a.rsplit("/", 1)[-1].split(":", 1)[0]
+    return Path(parts[0]).name
+
+
+def infra_failure(res: CmdResult) -> str:
+    """Why a command failed to run at all ('' if it ran)."""
+    if res.timed_out:
+        return "timed out"
+    if res.returncode in (125, 126, 127):
+        return f"could not start (exit {res.returncode})"
+    m = _INFRA_FAILURE_RE.search(res.combined or "")
+    if m and res.returncode != 0:
+        return m.group(0)
+    return ""
+
+
+def record_tool_failure(run_dir: Path, phase: str, tool: str, reason: str) -> None:
+    """Append a tool failure to <run_dir>/tool_failures.tsv (read by the CLI and triage)."""
+    path = run_dir / TOOL_FAILURES_FILE
+    line = f"{phase}\t{tool}\t{reason.replace(chr(9), ' ').replace(chr(10), ' ')[:200]}"
+    existing = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+    if line not in existing:
+        with path.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+
+
+def load_tool_failures(run_dir: Path) -> list[tuple[str, str, str]]:
+    """(phase, tool, reason) for every tool that failed in a run."""
+    path = run_dir / TOOL_FAILURES_FILE
+    if not path.is_file():
+        return []
+    out = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 3:
+            out.append((parts[0], parts[1], parts[2]))
+    return out
+
+
 def ev(
     console_dir: Path,
     phase: str,
@@ -180,7 +239,11 @@ def ev(
     display_cmd: str | None = None,
     title: str = "",
 ) -> CmdResult:
-    """Run a command and append '$ cmd + output' to console/<phase>.log as report evidence."""
+    """Run a command and append '$ cmd + output' to console/<phase>.log as report evidence.
+
+    A command that could not run at all (see infra_failure) is also recorded in
+    tool_failures.tsv so the gap is reported and triage does not mistake the
+    missing results for resolved findings."""
     cmd_str = display_cmd if display_cmd is not None else shlex.join(str(a) for a in args)
     t0 = time.perf_counter()
     res = run_cmd(args, timeout=timeout)
@@ -194,6 +257,9 @@ def ev(
         returncode=res.returncode,
         duration_ms=duration_ms,
     )
+    reason = infra_failure(res)
+    if reason:
+        record_tool_failure(console_dir.parent, phase, tool_name(args), reason)
     return res
 
 

@@ -16,8 +16,11 @@ ARG DEBIAN_RELEASE=bookworm
 # trufflehog's go.mod uses replace directives (no "go install"): take the
 # binary from its official multi-arch image instead
 ARG TRUFFLEHOG_VERSION=latest
+ARG GITLEAKS_VERSION=latest
 
 FROM trufflesecurity/trufflehog:${TRUFFLEHOG_VERSION} AS trufflehog
+# gitleaks: lighter secret scanner, official multi-arch image
+FROM zricethezav/gitleaks:${GITLEAKS_VERSION} AS gitleaks
 
 # ---------------------------------------------------------------------------
 # Go tools (ProjectDiscovery + amass), built for the target architecture
@@ -57,6 +60,7 @@ RUN apt-get update \
 
 COPY --from=gotools /out/ /usr/local/bin/
 COPY --from=trufflehog /usr/bin/trufflehog /usr/local/bin/trufflehog
+COPY --from=gitleaks /usr/bin/gitleaks /usr/local/bin/gitleaks
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Python tools live in their own virtualenvs, each with the Python it needs

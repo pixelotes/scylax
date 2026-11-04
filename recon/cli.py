@@ -10,11 +10,11 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from recon.config import ACTIVE_PHASES, DEFAULT_PHASES, RunContext, ScopeConfig
+from recon.config import ACTIVE_PHASES, DEFAULT_PHASES, RunContext, ScopeConfig, validate_scope
 from recon.deps import DependencyManager
 from recon.phases import PHASE_MAP, active, cloud, osint, saas, triage
 from recon.report import generate_reports
-from recon.runner import Logger, have, http_get, reset_phase_console
+from recon.runner import TOOL_FAILURES_FILE, Logger, have, http_get, load_tool_failures, reset_phase_console
 from recon.venv_manager import ensure_venv
 
 
@@ -176,6 +176,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="check and display all tool dependencies (native vs Docker) and exit",
     )
     parser.add_argument(
+        "--check-config",
+        action="store_true",
+        help="validate the scope file (unknown keys, missing files, empty sections) and exit",
+    )
+    parser.add_argument(
         "--report-only",
         metavar="DIR",
         help="regenerate report.md and report.html for an existing run directory and exit",
@@ -187,6 +192,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="do not prompt for or use a virtual environment (or set NO_VENV=1)",
     )
     return parser
+
+
+def _clear_tool_failures(run_dir: Path, phase: str) -> None:
+    """A phase that runs again starts with a clean failure record."""
+    path = run_dir / TOOL_FAILURES_FILE
+    if path.is_file():
+        keep = [l for l in path.read_text(encoding="utf-8").splitlines() if l.split("\t", 1)[0] != phase]
+        path.write_text("".join(f"{l}\n" for l in keep), encoding="utf-8")
 
 
 def preflight(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
@@ -288,6 +301,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         ok_req = dm.print_report(statuses, file=sys.stdout)
         return 0 if ok_req else 1
 
+    # 1b. Scope validation
+    if args.check_config:
+        errors, warnings = validate_scope(Path(args.scope))
+        for w in warnings:
+            log.warn(w)
+        for e in errors:
+            log.error(e)
+        if not errors and not warnings:
+            log.ok(f"{args.scope}: no problems found")
+        elif not errors:
+            log.ok(f"{args.scope}: {len(warnings)} warning(s), no errors")
+        return 1 if errors else 0
+
     # 2. Report only regeneration
     if args.report_only:
         report_dir = Path(args.report_only)
@@ -379,7 +405,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             log.warn(f"unknown phase {p}")
             continue
         reset_phase_console(ctx.console_dir, p)
+        _clear_tool_failures(ctx.run_dir, p)
         fn(ctx, dm, log)
+        for ph, tool, reason in load_tool_failures(ctx.run_dir):
+            if ph == p:
+                log.warn(f"{tool} failed in phase {p} ({reason}) - its results are missing; findings it would report are not re-checked")
 
     log.ok(f"Done. Evidence: {ctx.run_dir}")
     return 0

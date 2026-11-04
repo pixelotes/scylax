@@ -151,7 +151,7 @@ Scylax decouples security tools, cloud providers, intelligence services, and con
   - **Leaked Credentials & Password Breach:** `theharvester`, `amass`, `spiderfoot`, `trufflehog`, `hibp`, `gh`
   - **Intelligence APIs:** `shodan` (host queries & CVEDB correlation), `hibp` (domain breaches, compromised accounts, and free k-anonymity password check)
   - **Cloud Infrastructure:** `az` (Azure), `gcloud` (GCP), `aws` (AWS), `prowler` (CIS benchmarks)
-  - **SaaS Posture:** `m365_graph` (Microsoft 365 / Entra ID), `gh` (GitHub), `gam` (Google Workspace)
+  - **SaaS Posture:** `m365_graph` (Microsoft 365 / Entra ID), `gh` (GitHub), `gam` (Google Workspace), `gitleaks` / `trufflehog` (secret scanning of public repos)
 - **Plugin Lifecycle & Requirements:**
   Each phase explicitly declares its `required` and `optional` plugins (in `recon/deps.py`). If an optional plugin is missing, the phase runs in a graceful degraded mode using stdlib fallbacks or alternative tools.
 - **Provider Transparency (`native` vs `docker`):**
@@ -251,6 +251,7 @@ If you prefer not to install security tools natively on your host, pass `-D` / `
 | `whatweb` | `bberastegui/whatweb:latest` |
 | `nuclei` | `projectdiscovery/nuclei:latest` |
 | `trufflehog` | `trufflesecurity/trufflehog:latest` |
+| `gitleaks` | `zricethezav/gitleaks:latest` |
 | `theharvester` | `theharvester/theharvester:latest` |
 | `spiderfoot` | `spiderfoot/spiderfoot:latest` |
 | `az` | `mcr.microsoft.com/azure-cli:latest` |
@@ -266,7 +267,7 @@ If you prefer not to install security tools natively on your host, pass `-D` / `
 
 | Target | Contents |
 |---|---|
-| `core` | Python 3.12, `nmap`, `dig`, `whois`, `whatweb`, `subfinder`, `dnsx`, `httpx`, `nuclei` (templates baked in), `amass` v4, `trufflehog`, `theHarvester`, `spiderfoot` |
+| `core` | Python 3.12, `nmap`, `dig`, `whois`, `whatweb`, `subfinder`, `dnsx`, `httpx`, `nuclei` (templates baked in), `amass` v4, `trufflehog`, `gitleaks`, `theHarvester`, `spiderfoot` |
 | `full` (default) | `core` + `az` (with `resource-graph`), `gcloud`, `aws` v2, `gh`, `prowler` |
 
 ```bash
@@ -337,7 +338,7 @@ Key settings in `scopes/example.toml`:
 ## Running it
 
 ```text
-./scylax.py -s SCOPE_FILE [-p "PHASES"] [-d DATE] [-P] [-q | -qq] [-n] [-y] [-D] [--no-venv] [--cloud-posture] [--saas-posture] [--prowler] [--check-deps] [--report-only DIR]
+./scylax.py -s SCOPE_FILE [-p "PHASES"] [-d DATE] [-P] [-q | -qq] [-n] [-y] [-D] [--no-venv] [--cloud-posture] [--saas-posture] [--prowler] [--check-deps] [--check-config] [--report-only DIR]
 ```
 
 | Option | Meaning |
@@ -360,6 +361,7 @@ Key settings in `scopes/example.toml`:
 | `--authorisation-ref REF` | Written authorisation ticket/ref for active phases (or `AUTHORISATION_REF`) |
 | `-D`, `--docker` | Run supported tools via Docker containers instead of native binaries |
 | `--check-deps` | Print dependency status table and exit |
+| `--check-config` | Validate the scope file (unknown keys, missing files, empty sections) and exit |
 | `--report-only DIR` | Regenerate `report.md` and `report.html` for an existing run folder |
 
 ### Typical workflow

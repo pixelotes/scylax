@@ -11,8 +11,9 @@ from pathlib import Path
 
 from recon.config import RunContext
 from recon.deps import DependencyManager
-from recon.runner import Logger, ev, http_get, record_virtual_cmd, run_cmd
+from recon.runner import Logger, ev, http_get, infra_failure, record_tool_failure, record_virtual_cmd, run_cmd
 from recon.scope import guard_for, ip_in, is_public_ip, parse_networks
+from recon.sensitive_paths import SENSITIVE_PATHS, probe_sensitive_paths
 from recon.webprobe import PROBE_BYTES, discover_api, is_ingress_default_404, sniff_root_data
 
 
@@ -651,9 +652,9 @@ def phase8(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     if dm.run_dir is None:
         dm.run_dir = ctx.run_dir
 
-    if not dm.is_available("nuclei"):
-        log.warn("nuclei not available - phase 8 skipped")
-        return
+    nuclei_ok = dm.is_available("nuclei")
+    if not nuclei_ok:
+        log.warn("nuclei not available - phase 8 uses the native sensitive-path probe instead")
 
     targets: list[str] = []
     for ip in ctx.scope.hvt_ips:
@@ -701,7 +702,13 @@ def phase8(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     )
 
     nuclei_jsonl = ctx.web_dir / "nuclei.jsonl"
-    ev(
+    for stale in (nuclei_jsonl, ctx.web_dir / "sensitive_paths.tsv"):
+        if stale.is_file():
+            stale.unlink()  # never report a previous run's results as this run's
+    if not nuclei_ok:
+        _sensitive_path_fallback(ctx, log, filtered_targets)
+        return
+    res = ev(
         ctx.console_dir,
         "8",
         dm.build_cmd(
@@ -725,9 +732,32 @@ def phase8(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         title="nuclei scan",
     )
 
+    if res.returncode != 0 or infra_failure(res):
+        record_tool_failure(ctx.run_dir, "8", "nuclei", infra_failure(res) or f"exit {res.returncode}")
+        log.warn("nuclei failed - running the native sensitive-path probe as a fallback")
+        _sensitive_path_fallback(ctx, log, filtered_targets)
+        return
+
     findings_count = 0
     if nuclei_jsonl.is_file():
         findings_count = sum(
             1 for line in nuclei_jsonl.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()
         )
     log.ok(f"nuclei: {findings_count} findings")
+
+
+def _sensitive_path_fallback(ctx: RunContext, log: Logger, targets: list[str]) -> None:
+    """Probe the curated sensitive paths on the (owned) nuclei targets."""
+    bases = sorted({
+        f"{urllib.parse.urlparse(t).scheme or 'https'}://{urllib.parse.urlparse(t).netloc}"
+        for t in targets if urllib.parse.urlparse(t).netloc
+    })
+    log.info(f"Sensitive-path probe: {len(SENSITIVE_PATHS)} curated paths on {len(bases)} owned base URL(s)")
+    hits = probe_sensitive_paths(bases, http_get)
+    rows = [f"{h.url}\t{h.category}\t{h.severity}\t{h.title}\t{h.snippet}" for h in hits]
+    (ctx.web_dir / "sensitive_paths.tsv").write_text("".join(f"{r}\n" for r in rows), encoding="utf-8")
+    record_virtual_cmd(
+        ctx.console_dir, "8", f"sensitive-path probe ({len(SENSITIVE_PATHS)} paths x {len(bases)} hosts)",
+        "\n".join(rows) or "no sensitive paths found", title="Native sensitive-path probe (nuclei fallback)",
+    )
+    log.ok(f"sensitive-path probe: {len(hits)} finding(s) in web/sensitive_paths.tsv")

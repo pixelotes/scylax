@@ -12,6 +12,17 @@ scope_owner = "Sarah Jenkins, VP of Information Security (Contoso Ltd.)"
 authorised_by = "Sarah Jenkins, VP of Information Security (Contoso Ltd.) - 2026-11-01"
 authorisation_ref = "SEC-2026-8841"
 
+# Where runs/<scope>/<date>/ and the finding history are written. Absolute, or
+# relative to this scope file. Set it so runs land in the same place wherever you
+# launch Scylax from (e.g. a private folder next to the public checkout).
+# Leave empty to use <working directory>/runs.
+runs_dir = ""
+
+# Optional incoming webhook (Microsoft Teams or any JSON endpoint). After a run,
+# new and reappeared high/critical findings are posted to it. Also settable via
+# the SCYLAX_ALERT_WEBHOOK environment variable. Leave empty to disable alerts.
+alert_webhook = ""
+
 [targets]
 # Required: Root domains owned by the organization.
 domains = ["contoso.com", "northwindtraders.com", "fabrikam.io"]

@@ -73,6 +73,8 @@ class ScopeConfig:
     # as third-party hosting (CDN, SaaS, shared cloud) and left alone.
     owned_ranges: List[str] = field(default_factory=list)
     owned_ips_file: str = ""
+    runs_dir: str = ""
+    alert_webhook: str = ""
     auto_discover_targets: bool = True
     skip_portscan_orgs: List[str] = field(
         default_factory=lambda: list(DEFAULT_SKIP_PORTSCAN_ORGS)
@@ -329,6 +331,8 @@ class ScopeConfig:
             exclude_ips=_split_list(flat.get("exclude_ips")),
             owned_ranges=_split_list(flat.get("owned_ranges")),
             owned_ips_file=str(flat.get("owned_ips_file") or "").strip(),
+            runs_dir=str(flat.get("runs_dir") or flat.get("engagement_runs_dir") or "").strip(),
+            alert_webhook=str(flat.get("alert_webhook") or flat.get("engagement_alert_webhook") or "").strip(),
             auto_discover_targets=auto_discover_targets,
             skip_portscan_orgs=skip_portscan_orgs_list,
             apex_trusted_orgs=apex_orgs_list,
@@ -437,8 +441,21 @@ class RunContext:
         return datetime.date.today().isoformat()
 
     @property
+    def runs_root(self) -> Path:
+        """Where runs/<scope>/<date> live. Defaults to <cwd>/runs; a scope's
+        runs_dir (absolute, or relative to the scope file) overrides it so runs
+        and the finding history land in the same place from any directory."""
+        rd = getattr(self.scope, "runs_dir", "")
+        if rd:
+            p = Path(rd).expanduser()
+            if not p.is_absolute():
+                p = self.scope.path.resolve().parent / p
+            return p
+        return self.root / "runs"
+
+    @property
     def run_dir(self) -> Path:
-        return self.root / "runs" / self.scope.name / self.run_date
+        return self.runs_root / self.scope.name / self.run_date
 
     @property
     def raw_dir(self) -> Path:
@@ -478,7 +495,7 @@ class RunContext:
 
     @property
     def prev_run_dir(self) -> Path | None:
-        scope_runs = self.root / "runs" / self.scope.name
+        scope_runs = self.runs_root / self.scope.name
         if not scope_runs.is_dir():
             return None
         candidates = sorted(
@@ -499,3 +516,87 @@ class RunContext:
             self.console_dir,
         ):
             d.mkdir(parents=True, exist_ok=True)
+
+
+# Recognized scope keys, by section (plus top-level). Used by --check-config to
+# flag typos and misplaced keys. Kept in sync with ScopeConfig.load().
+_SCOPE_SCHEMA: dict[str, tuple[str, ...]] = {
+    "": (  # top-level / flat keys
+        "engagement", "scope_owner", "authorised_by", "authorisation_ref", "runs_dir",
+        "domains", "www_url", "hvt_ips", "edge_ips", "exclude_ips",
+        "owned_ranges", "owned_ips_file", "auto_discover", "auto_discover_targets",
+        "skip_portscan_orgs", "apex_trusted_orgs", "use_amass",
+        "edge_ports", "edge_max_rate", "nmap_max_rate", "httpx_rate", "nuclei_rate",
+        "amass_timeout_min", "top_ports", "quick", "quick_scan",
+        "min_apache", "min_nginx", "min_routeros",
+        "shodan_api_key", "shodan_key", "hibp_api_key", "hibp_key",
+    ),
+    "engagement": ("engagement", "scope_owner", "authorised_by", "authorisation_ref", "runs_dir", "alert_webhook"),
+    "targets": (
+        "domains", "www_url", "hvt_ips", "edge_ips", "exclude_ips", "owned_ranges",
+        "owned_ips_file", "auto_discover", "auto_discover_targets", "skip_portscan_orgs",
+        "apex_trusted_orgs", "use_amass", "edge_ports",
+    ),
+    "azure": ("subscriptions", "inventory_file"),
+    "gcp": ("projects", "inventory_file"),
+    "aws": ("profiles", "regions", "inventory_file"),
+    "cloud_posture": ("cloud_posture", "enabled", "use_prowler", "prowler"),
+    "saas": ("saas_posture", "providers"),
+    "intelligence": ("shodan_api_key", "shodan_key", "hibp_api_key", "hibp_key"),
+    "limits": ("edge_max_rate", "nmap_max_rate", "httpx_rate", "nuclei_rate",
+               "amass_timeout_min", "top_ports", "edge_ports"),
+    "thresholds": ("min_apache", "min_nginx", "min_routeros"),
+}
+
+
+def validate_scope(path: Path) -> tuple[list[str], list[str]]:
+    """Static checks on a scope file for --check-config. Returns (errors, warnings).
+    Errors would stop a run; warnings are hygiene (unknown keys, missing files,
+    empty sections). Does not perform any network or filesystem scanning."""
+    errors: list[str] = []
+    warnings: list[str] = []
+    if not path.is_file():
+        return [f"scope file not found: {path}"], []
+    try:
+        with path.open("rb") as f:
+            raw = tomllib.load(f)
+    except Exception as exc:  # noqa: BLE001
+        return [f"not valid TOML: {exc}"], []
+
+    for key, val in raw.items():
+        if isinstance(val, dict):
+            allowed = _SCOPE_SCHEMA.get(key.lower())
+            if allowed is None:
+                warnings.append(f"unknown section [{key}]")
+                continue
+            if not val:
+                warnings.append(f"section [{key}] is empty")
+            for sk in val:
+                if sk.lower() not in allowed:
+                    warnings.append(f"unknown key '{sk}' in [{key}]")
+        else:
+            if key.lower() not in _SCOPE_SCHEMA[""]:
+                warnings.append(f"unknown top-level key '{key}'")
+
+    try:
+        scope = ScopeConfig.load(path)
+    except Exception as exc:  # noqa: BLE001
+        errors.append(str(exc))
+        return errors, warnings
+
+    if not scope.domains:
+        errors.append("'domains' is required and is empty")
+    for label, f in (("owned_ips_file", scope.owned_ips_file),
+                     ("azure_inventory_file", scope.azure_inventory_file),
+                     ("gcp_inventory_file", scope.gcp_inventory_file),
+                     ("aws_inventory_file", scope.aws_inventory_file)):
+        if f and scope.resolve_file(f) is None:
+            errors.append(f"{label} not found: {f}")
+    if scope.saas_posture and not scope.saas_providers:
+        warnings.append("saas_posture is on but no providers are listed")
+    if not scope.authorised_by:
+        warnings.append("authorised_by is empty (required for active phases unless -P)")
+    if not (scope.owned_ranges or scope.owned_ips_file):
+        warnings.append("no owned_ranges / owned_ips_file: ownership allowlist disabled, "
+                        "auto-discovered IPs will not be port/nuclei-scanned")
+    return errors, warnings
