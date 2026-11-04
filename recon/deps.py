@@ -23,7 +23,7 @@ PHASE_DEPENDENCIES: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "6": ((), ("hibp",)),
     "7": ((), ("shodan",)),
     "8": ((), ("nuclei",)),
-    "9": (("theharvester",), ("amass", "spiderfoot", "hibp", "xposedornot", "trufflehog", "gh")),
+    "9": ((), ("theharvester", "amass", "spiderfoot", "hibp", "xposedornot", "trufflehog", "gh")),
     "A": ((), ("az", "nmap", "prowler")),
     "G": ((), ("gcloud", "nmap", "prowler")),
     "W": ((), ("aws", "nmap", "prowler")),

@@ -28,10 +28,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Install required CLI tools
+        # dig (dnsutils), whois and nmap are the pipeline's required tools; the
+        # test suite expects them present so --check-deps / preflight pass.
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dnsutils whois nmap
       - name: Run tests
         # Scylax is pure stdlib; tests use synthetic data and mock all tools/network.
-        env:
-          NO_VENV: "1"
         run: python -m unittest discover -s tests -v
 
   docker:
