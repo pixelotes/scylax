@@ -1186,7 +1186,7 @@ def phaseA(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     ctx.azure_dir.mkdir(parents=True, exist_ok=True)
 
     if ctx.scope.azure_inventory_file:
-        inv_path = Path(ctx.scope.azure_inventory_file)
+        inv_path = ctx.scope.resolve_file(ctx.scope.azure_inventory_file) or Path(ctx.scope.azure_inventory_file)
         if inv_path.is_file():
             shutil.copyfile(inv_path, ctx.azure_dir / "public_ips.tsv")
         else:
@@ -1332,7 +1332,7 @@ def phaseG(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
     projects: list[str] = []
     if ctx.scope.gcp_inventory_file:
-        inv_path = Path(ctx.scope.gcp_inventory_file)
+        inv_path = ctx.scope.resolve_file(ctx.scope.gcp_inventory_file) or Path(ctx.scope.gcp_inventory_file)
         if inv_path.is_file():
             shutil.copyfile(inv_path, ctx.gcp_dir / "public_ips.tsv")
         else:
@@ -1557,7 +1557,7 @@ def phaseW(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     # 1. Scannable AWS Assets Enumeration
     aws_inv_file = getattr(ctx.scope, "aws_inventory_file", "")
     if aws_inv_file:
-        inv_path = Path(aws_inv_file)
+        inv_path = ctx.scope.resolve_file(aws_inv_file) or Path(aws_inv_file)
         if inv_path.is_file():
             shutil.copyfile(inv_path, aws_dir / "public_ips.tsv")
         else:

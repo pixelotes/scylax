@@ -1,5 +1,6 @@
 """Scope enforcement tests: private IPs, exclude/edge on hostname paths, CIDR entries."""
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -123,6 +124,35 @@ class TestOwnership(unittest.TestCase):
             self.assertTrue(scope.ownership_enforced)
             self.assertEqual(sorted(scope.owned_entries()), ["198.51.100.198", "203.0.113.0/25", "203.0.113.110"])
 
+
+
+class TestScopeFilePaths(unittest.TestCase):
+    TOML = 'domains = ["example.com"]\nowned_ips_file = "scopes/owned.txt"\n'
+
+    def _layout(self, root: Path) -> Path:
+        (root / "scopes").mkdir()
+        (root / "scopes" / "owned.txt").write_text("198.51.100.198\n", encoding="utf-8")
+        toml = root / "scopes" / "s.toml"
+        toml.write_text(self.TOML, encoding="utf-8")
+        return toml
+
+    def test_owned_file_found_from_any_working_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as elsewhere:
+            toml = self._layout(Path(td))
+            cwd = Path.cwd()
+            try:
+                os.chdir(elsewhere)
+                scope = ScopeConfig.load(toml)
+            finally:
+                os.chdir(cwd)
+            self.assertIn("198.51.100.198", scope.owned_entries())
+
+    def test_missing_owned_file_is_an_error(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            toml = self._layout(Path(td))
+            (Path(td) / "scopes" / "owned.txt").unlink()
+            with self.assertRaisesRegex(ValueError, "owned_ips_file not found"):
+                ScopeConfig.load(toml)
 
 
 class TestOptInPhases(unittest.TestCase):
