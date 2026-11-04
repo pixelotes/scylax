@@ -405,7 +405,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # API plugins are detected through their environment variables: expose keys
     # that came from the scope file or the command line the same way.
-    for var, value in (("SHODAN_API_KEY", ctx.shodan_api_key), ("HIBP_API_KEY", ctx.hibp_api_key)):
+    for var, value in (
+        ("SHODAN_API_KEY", ctx.shodan_api_key),
+        ("HIBP_API_KEY", ctx.hibp_api_key),
+        ("NVD_API_KEY", scope.intel_keys.get("nvd_api_key", "")),
+    ):
         if value and not os.environ.get(var, "").strip():
             os.environ[var] = value
 

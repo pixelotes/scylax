@@ -18,12 +18,13 @@ import os
 import pathlib
 import random
 import re
+import shutil
 import socket
 import time
 import urllib.parse
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Callable, Dict, List, Set, Tuple
 
 from recon.config import RunContext
 from recon.deps import DependencyManager
@@ -36,14 +37,48 @@ from recon.runner import (
     record_virtual_cmd,
     run_cmd,
 )
+from recon.osint_keys import collect_keys, write_configs
 from recon.nvd import cpe_to_23, load_kev_ids, nvd_cves_for_cpe
 from recon.scope import ScopeGuard
 from recon.takeover import check_takeover
 from recon.webprobe import is_hash_label
 
 
+def _prepare_key_args(
+    ctx: RunContext, dm: DependencyManager, log: Logger, keys_dir: Path
+) -> tuple[list[str], list[str]]:
+    """Write subfinder/amass provider configs from the scope's API keys.
+
+    Returns extra CLI args for (subfinder, amass); both empty when no key applies."""
+    keys = collect_keys(ctx.scope, ctx.shodan_api_key)
+    if not keys:
+        return [], []
+
+    def tool_path(tool: str) -> Callable[[Path], str]:
+        # In docker mode the run dir is mounted at /data inside the container.
+        if dm.get_provider(tool) == "docker":
+            return lambda p: f"/data/{p.relative_to(ctx.run_dir).as_posix()}"
+        return lambda p: str(p.resolve())
+
+    sf_path, _, sources = write_configs(keys, keys_dir, tool_path("subfinder"))
+    _, am_path, _ = write_configs(keys, keys_dir, tool_path("amass"))
+    if sources:
+        log.info(f"API keys loaded for subfinder/amass: {', '.join(sources)}")
+    return (["-pc", sf_path] if sf_path else []), (["-config", am_path] if am_path else [])
+
+
 def phase1(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     """Phase 1 - passive subdomain enumeration (subfinder, amass -passive, crt.sh)."""
+    ctx.ensure_dirs()
+    keys_dir = ctx.run_dir / ".keys"
+    try:
+        sf_args, am_args = _prepare_key_args(ctx, dm, log, keys_dir)
+        _phase1(ctx, dm, log, sf_args, am_args)
+    finally:
+        shutil.rmtree(keys_dir, ignore_errors=True)  # never leave keys in the evidence folder
+
+
+def _phase1(ctx: RunContext, dm: DependencyManager, log: Logger, sf_args: list[str], am_args: list[str]) -> None:
     log.info("Phase 1 - passive subdomain enumeration (subfinder, amass -passive, crt.sh)")
     ctx.ensure_dirs()
 
@@ -62,7 +97,7 @@ def phase1(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     for d in ctx.scope.domains:
         # 1. subfinder
         if dm.is_available("subfinder"):
-            cmd = dm.build_cmd("subfinder", ["-d", d, "-all", "-silent"])
+            cmd = dm.build_cmd("subfinder", ["-d", d, "-all", "-silent", *sf_args])
             res = ev(ctx.console_dir, "1", cmd, timeout=300, title=f"subfinder ({d})")
             for line in res.stdout.splitlines():
                 s = line.strip()
@@ -74,14 +109,33 @@ def phase1(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
             amass_timeout = ctx.scope.amass_timeout_min * 60 + 120
             cmd = dm.build_cmd(
                 "amass",
-                ["enum", "-passive", "-timeout", str(ctx.scope.amass_timeout_min), "-d", d],
+                ["enum", "-passive", "-timeout", str(ctx.scope.amass_timeout_min), *am_args, "-d", d],
             )
             res = ev(ctx.console_dir, "1", cmd, timeout=amass_timeout, title=f"amass ({d})")
             amass_re = re.compile(rf"([a-zA-Z0-9_-]+\.)+{re.escape(d)}", re.IGNORECASE)
             for m in amass_re.finditer(res.stdout):
                 all_raw_lines.append(m.group(0))
-            if res.returncode != 0 or res.timed_out:
-                log.warn(f"amass failed for {d}")
+            # amass v5 stores results in its asset DB (enum stdout is mostly a
+            # progress bar), so harvest whatever it found - even after a timeout.
+            subs = ev(
+                ctx.console_dir, "1",
+                dm.build_cmd("amass", ["subs", "-names", "-nocolor", "-d", d]),
+                timeout=60, title=f"amass subs ({d})",
+            )
+            harvested = 0
+            if subs.returncode == 0:
+                for m in amass_re.finditer(subs.stdout):
+                    all_raw_lines.append(m.group(0))
+                    harvested += 1
+            if res.timed_out:
+                log.warn(
+                    f"amass timed out for {d} after {amass_timeout}s "
+                    f"(-timeout is minutes *without progress*, a stalled/busy amass engine "
+                    f"can hold it open; try `pkill -f 'amass engine'`); "
+                    f"recovered {harvested} names from its DB"
+                )
+            elif res.returncode != 0:
+                log.warn(f"amass failed for {d} (rc={res.returncode}): {res.stderr.strip()[-200:]}")
 
         # 3. crt.sh
         url = f"https://crt.sh/?q=%25.{d}&output=json"
@@ -510,12 +564,37 @@ def phase6(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     log.info("Phase 6 - historical URLs (Wayback CDX) & potential entry points")
     ctx.ensure_dirs()
 
+    # TLDs that can never exist on the public internet (so never in the archive).
+    non_public_tlds = {"local", "localhost", "internal", "lan", "home", "corp", "intranet", "test", "invalid", "example"}
+    retry_delays = (0, 5, 15, 30)  # Wayback CDX returns transient 503s under load
+
     for d in ctx.scope.domains:
+        tld = d.rsplit(".", 1)[-1].lower()
+        if tld in non_public_tlds:
+            log.info(f"Wayback CDX for {d} skipped (non-public TLD, never archived)")
+            continue
+
         url = f"https://web.archive.org/cdx/search/cdx?url=*.{d}/*&output=txt&fl=original&collapse=urlkey"
-        resp = http_get(url, timeout=180)
-        (ctx.osint_dir / f"wayback_{d}.txt").write_text(resp.body, encoding="utf-8")
-        if resp.status != 200 or not resp.body.strip():
-            log.warn(f"Wayback CDX for {d} failed or timed out")
+        resp = None
+        for attempt, delay in enumerate(retry_delays, start=1):
+            if delay:
+                time.sleep(delay)
+            resp = http_get(url, timeout=180)
+            if resp.status == 200:
+                break
+            # 4xx (except 429) won't improve on retry
+            if 400 <= resp.status < 500 and resp.status != 429:
+                break
+            log.warn(
+                f"Wayback CDX for {d}: HTTP {resp.status or 'timeout/connection error'} "
+                f"(attempt {attempt}/{len(retry_delays)})"
+            )
+        assert resp is not None
+        (ctx.osint_dir / f"wayback_{d}.txt").write_text(resp.body if resp.status == 200 else "", encoding="utf-8")
+        if resp.status != 200:
+            log.warn(f"Wayback CDX for {d} failed (last status: {resp.status or 'timeout/connection error'})")
+        elif not resp.body.strip():
+            log.info(f"Wayback CDX for {d}: no archived URLs")
 
     all_urls: list[str] = []
     for d in ctx.scope.domains:

@@ -7,7 +7,9 @@ import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
+from typing import Dict, List
+
+from recon.osint_keys import INTEL_KEY_FIELDS
 
 
 DEFAULT_PHASES: List[str] = ["1", "2", "3", "4", "4b", "5", "6", "7", "8", "9", "A", "G", "W", "S", "C", "T"]
@@ -102,6 +104,7 @@ class ScopeConfig:
     aws_inventory_file: str = ""
     shodan_api_key: str = ""
     hibp_api_key: str = ""
+    intel_keys: Dict[str, str] = field(default_factory=dict)
     cloud_posture: bool = False
     use_prowler: bool = False
     saas_posture: bool = False
@@ -367,6 +370,7 @@ class ScopeConfig:
             aws_inventory_file=aws_inventory_file,
             shodan_api_key=str(flat.get("shodan_api_key") or flat.get("shodan_key") or "").strip(),
             hibp_api_key=str(flat.get("hibp_api_key") or flat.get("hibp_key") or "").strip(),
+            intel_keys={k: str(flat[k]).strip() for k in INTEL_KEY_FIELDS if str(flat.get(k) or "").strip()},
             cloud_posture=cloud_posture,
             use_prowler=use_prowler,
             saas_posture=saas_posture,
@@ -566,7 +570,7 @@ _SCOPE_SCHEMA: dict[str, tuple[str, ...]] = {
     "aws": ("profiles", "regions", "inventory_file"),
     "cloud_posture": ("cloud_posture", "enabled", "use_prowler", "prowler"),
     "saas": ("saas_posture", "providers"),
-    "intelligence": ("shodan_api_key", "shodan_key", "hibp_api_key", "hibp_key"),
+    "intelligence": ("shodan_api_key", "shodan_key", "hibp_api_key", "hibp_key", *INTEL_KEY_FIELDS),
     "content_discovery": ("content_discovery", "enabled", "wordlist", "rate",
                           "content_discovery_wordlist", "content_discovery_rate"),
     "limits": ("edge_max_rate", "nmap_max_rate", "httpx_rate", "nuclei_rate",
