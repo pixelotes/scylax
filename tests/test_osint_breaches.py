@@ -72,6 +72,23 @@ domains = ["contoso.com"]
         self.assertIn("Passwords", acc_b[0]["data_classes"])
         self.assertFalse(any("breachedaccount" in c.args[0] for c in mock_http.call_args_list))
 
+    @patch("recon.phases.osint.time.sleep")
+    @patch("recon.phases.osint.http_get_json")
+    def test_rate_limited_lookup_is_retried(self, mock_http: MagicMock, mock_sleep: MagicMock) -> None:
+        self.ctx.hibp_api_key = ""
+        answers = {"xpo": [(429, None), (429, None), (200, {"breaches": [["Apollo"]]})]}
+
+        def fake(url, headers=None, timeout=0):
+            if "xposedornot" in url:
+                return answers["xpo"].pop(0)
+            return 404, None
+
+        mock_http.side_effect = fake
+        with patch.dict("os.environ", {}, clear=True):
+            _, acc_b = run_hibp_breaches(self.ctx, self.log, emails=["jdoe@contoso.com"])
+        self.assertEqual([b["name"] for b in acc_b], ["Apollo"])
+        self.assertEqual(sum(1 for c in mock_sleep.call_args_list if c.args[0] == 30.0), 2)
+
     @patch("recon.phases.osint.http_get_json")
     def test_hibp_successful_breaches_found(self, mock_http: MagicMock) -> None:
         mock_http.return_value = (

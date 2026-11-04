@@ -866,8 +866,8 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 add(
                     sev,
                     f"hibp-account:{b_email}:{b_name}",
-                    f"Compromised corporate email: {b_email} in {b_title} ({b_date})",
-                    f"Exposed data: {b_classes}",
+                    f"Compromised corporate email: {b_email} in {b_title} ({b_date or 'date unknown'})",
+                    f"Exposed data: {b_classes.replace(';', '; ') or 'unknown (not published for this breach)'}",
                 )
 
     # ------------------------------------------------------------------

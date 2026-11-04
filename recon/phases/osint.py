@@ -1191,6 +1191,32 @@ def _hibp_breach_details(name: str) -> dict[str, Any] | None:
     return details
 
 
+BREACH_RETRY_WAIT = 30.0
+BREACH_RETRIES = 2
+
+
+def _breach_lookup(
+    log: Logger,
+    service: str,
+    em: str,
+    url: str,
+    headers: dict[str, str],
+) -> tuple[int, Any]:
+    """GET a per-account breach API, retrying failures (rate limit, 5xx, timeout).
+
+    200 and 404 are answers ("breached" / "not breached"); anything else is
+    retried after BREACH_RETRY_WAIT seconds, up to BREACH_RETRIES times.
+    """
+    status, data = http_get_json(url, headers=headers, timeout=20.0)
+    for attempt in range(1, BREACH_RETRIES + 1):
+        if status in (200, 404):
+            break
+        log.info(f"{service} lookup for {em} returned HTTP {status}; retry {attempt}/{BREACH_RETRIES} in {BREACH_RETRY_WAIT:.0f}s")
+        time.sleep(BREACH_RETRY_WAIT)
+        status, data = http_get_json(url, headers=headers, timeout=20.0)
+    return status, data
+
+
 def _xposedornot_account_breaches(
     ctx: RunContext,
     log: Logger,
@@ -1205,7 +1231,7 @@ def _xposedornot_account_breaches(
     for em in emails:
         time.sleep(1.1)
         url = f"https://api.xposedornot.com/v1/check-email/{urllib.parse.quote(em)}"
-        status, data = http_get_json(url, headers={"User-Agent": "Scylax/1.0"}, timeout=20.0)
+        status, data = _breach_lookup(log, "XposedOrNot", em, url, {"User-Agent": "Scylax/1.0"})
         display_cmd = f"curl -s '{url}'"
         if status == 404:
             record_virtual_cmd(
@@ -1215,7 +1241,7 @@ def _xposedornot_account_breaches(
             )
             continue
         if status != 200 or not isinstance(data, dict):
-            log.warn(f"XposedOrNot lookup for {em} returned HTTP {status}")
+            log.warn(f"XposedOrNot lookup for {em} returned HTTP {status} after {BREACH_RETRIES} retries")
             record_virtual_cmd(
                 ctx.console_dir, "9", display_cmd, f"HTTP {status}",
                 title=f"XposedOrNot account breaches ({em})", returncode=1,
@@ -1347,7 +1373,7 @@ def run_hibp_breaches(
         for em in target_emails[:50]:
             time.sleep(1.6)  # HIBP enforces 1 request per 1.5s rate limit
             url = f"https://haveibeenpwned.com/api/v3/breachedaccount/{urllib.parse.quote(em)}?truncateResponse=false"
-            status, data = http_get_json(url, headers=headers, timeout=20.0)
+            status, data = _breach_lookup(log, "HIBP", em, url, headers)
             display_cmd = f"curl -s{key_hdr} '{url}'"
 
             if status == 200 and isinstance(data, list):
@@ -1389,7 +1415,7 @@ def run_hibp_breaches(
                     title=f"HIBP account breaches ({em})",
                 )
             else:
-                log.warn(f"HIBP account lookup for {em} returned HTTP {status}")
+                log.warn(f"HIBP account lookup for {em} returned HTTP {status} after {BREACH_RETRIES} retries")
                 record_virtual_cmd(
                     ctx.console_dir,
                     "9",
