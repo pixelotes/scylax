@@ -194,18 +194,15 @@ def preflight(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     log.info(f"Scope: {ctx.scope.path}  Run folder: {ctx.run_dir}  (previous: {ctx.prev_run_dir or 'none'})")
 
     # Determine active phases that will actually run
-    effective_phases = [
-        p for p in ctx.phases
-        if not (ctx.skip_active and p in ACTIVE_PHASES)
-        and not ((ctx.skip_cloud or ctx.skip_azure) and p in ("A", "G", "W"))
-    ]
+    effective_phases = [p for p in ctx.phases if not ctx.phase_skip_reason(p)]
 
     statuses = dm.check_all(effective_phases)
     ok_req = dm.print_report(statuses)
 
     for st in statuses:
         if not st.available and not st.is_required_for_active and st.needed_for_phases:
-            log.warn(f"{st.plugin.name} not available ({st.plugin.install_macos}) - phase {'/'.join(st.plugin.phases)} degraded")
+            used_by = [p for p in st.plugin.phases if p in effective_phases]
+            log.warn(f"{st.plugin.name} not available ({st.plugin.install_macos}) - phase {'/'.join(used_by)} degraded")
 
     if not ok_req:
         log.error("Missing required dependencies for requested phases. Install them or try --docker.")
@@ -327,6 +324,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         scope.authorisation_ref = os.environ.get("AUTHORISATION_REF", "").strip()
 
     phases = [p.strip() for p in re.split(r"[\s,]+", args.phases) if p.strip()]
+    # Cloud annexes named explicitly (-p or $PHASES) run even without provider config.
+    explicit_phases = args.phases != " ".join(DEFAULT_PHASES)
 
     ctx = RunContext(
         root=Path.cwd(),
@@ -344,6 +343,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         use_prowler=bool(args.use_prowler or scope.use_prowler),
         saas_posture=bool(args.saas_posture or scope.saas_posture),
         quick_scan=bool(args.quick or scope.quick_scan),
+        explicit_phases=explicit_phases,
         top_ports=(
             args.top_ports if args.top_ports is not None
             else scope.top_ports if scope.top_ports is not None
@@ -364,11 +364,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     phase_dispatch = PHASE_MAP
 
     for p in ctx.phases:
-        if ctx.skip_active and p in ACTIVE_PHASES:
-            log.info(f"skip phase {p} (skip_active)")
-            continue
-        if (ctx.skip_cloud or ctx.skip_azure) and p in ("A", "G", "W"):
-            log.info(f"skip phase {p} (skip_cloud)")
+        reason = ctx.phase_skip_reason(p)
+        if reason:
+            log.info(f"skip phase {p} ({reason})")
             continue
         fn = phase_dispatch.get(p)
         if fn is None:

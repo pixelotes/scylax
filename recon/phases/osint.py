@@ -1450,8 +1450,6 @@ Public GitHub code search (after gh auth login):
                 )
         else:
             log.warn("gh not authenticated - public code-leak search not run")
-    else:
-        log.warn("gh not authenticated - public code-leak search not run")
 
     # 1. Enumerate corporate emails via theHarvester, amass, spiderfoot, and passive sources
     emails = run_email_enumeration(ctx, dm, log)

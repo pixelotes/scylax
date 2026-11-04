@@ -12,6 +12,7 @@ from typing import List
 
 DEFAULT_PHASES: List[str] = ["1", "2", "3", "4", "4b", "5", "6", "7", "8", "9", "A", "G", "W", "S", "T"]
 ACTIVE_PHASES: set[str] = {"3", "4", "4b", "5", "8", "A", "G", "W"}
+CLOUD_PHASES: set[str] = {"A", "G", "W"}
 
 
 def _split_list(val: object) -> List[str]:
@@ -363,6 +364,7 @@ class RunContext:
     saas_posture: bool = False
     quick_scan: bool = False
     top_ports: int | None = None
+    explicit_phases: bool = False
 
     def __post_init__(self) -> None:
         if self.skip_cloud:
@@ -381,6 +383,33 @@ class RunContext:
             self.shodan_api_key = self.scope.shodan_api_key
         if not self.hibp_api_key and getattr(self.scope, "hibp_api_key", ""):
             self.hibp_api_key = self.scope.hibp_api_key
+
+    def phase_skip_reason(self, phase: str) -> str:
+        """Why a requested phase will not run ('' when it will).
+
+        Cloud annexes and SaaS posture are opt-in: they run only when the scope
+        configures that provider (or the annex is named explicitly with -p), so
+        a plain external recon never probes for az/gcloud/aws/gh/gam."""
+        if self.skip_active and phase in ACTIVE_PHASES:
+            return "skip_active"
+        if phase in CLOUD_PHASES:
+            if self.skip_cloud or self.skip_azure:
+                return "skip_cloud"
+            if not self.explicit_phases and not self.cloud_configured(phase):
+                return "no cloud provider configured in scope"
+        if phase == "S" and not self.saas_posture:
+            return "SaaS posture disabled"
+        return ""
+
+    def cloud_configured(self, phase: str) -> bool:
+        sc = self.scope
+        if phase == "A":
+            return bool(sc.azure_subscriptions or sc.azure_inventory_file)
+        if phase == "G":
+            return bool(sc.gcp_projects or sc.gcp_inventory_file)
+        if phase == "W":
+            return bool(sc.aws_profiles or sc.aws_regions or sc.aws_inventory_file)
+        return True
 
     @property
     def today(self) -> str:

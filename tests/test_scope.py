@@ -125,5 +125,30 @@ class TestOwnership(unittest.TestCase):
 
 
 
+class TestOptInPhases(unittest.TestCase):
+    def _ctx(self, explicit: bool = False, **scope_kw) -> RunContext:
+        scope = ScopeConfig(path=Path("s.toml"), name="s", engagement="s", **scope_kw)
+        return RunContext(root=Path("."), scope=scope, run_date="2026-11-04",
+                          phases=["1", "A", "G", "W", "S", "T"], explicit_phases=explicit)
+
+    def test_unconfigured_cloud_and_saas_are_skipped(self) -> None:
+        ctx = self._ctx()
+        for p in ("A", "G", "W", "S"):
+            self.assertTrue(ctx.phase_skip_reason(p), p)
+        self.assertEqual(ctx.phase_skip_reason("1"), "")
+
+    def test_configured_provider_runs(self) -> None:
+        ctx = self._ctx(aws_inventory_file="aws.tsv", saas_posture=True)
+        self.assertEqual(ctx.phase_skip_reason("W"), "")
+        self.assertEqual(ctx.phase_skip_reason("S"), "")
+        self.assertTrue(ctx.phase_skip_reason("A"))
+
+    def test_explicit_phase_runs_and_no_cloud_wins(self) -> None:
+        self.assertEqual(self._ctx(explicit=True).phase_skip_reason("A"), "")
+        ctx = self._ctx(explicit=True)
+        ctx.skip_cloud = True
+        self.assertEqual(ctx.phase_skip_reason("A"), "skip_cloud")
+
+
 if __name__ == "__main__":
     unittest.main()
