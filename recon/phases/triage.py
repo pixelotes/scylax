@@ -666,13 +666,14 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     )
 
     # Public IP per NIC ("networkInterfaces/<nic>" in public_ips.tsv), to point NSG findings at an address.
+    # Azure resource names are case-insensitive and both APIs spell them differently.
     azure_nic_ips: dict[str, str] = {}
     azure_ips_file = ctx.azure_dir / "public_ips.tsv"
     if azure_ips_file.is_file():
         for line in azure_ips_file.read_text(encoding="utf-8", errors="replace").splitlines():
             parts = line.strip().split("\t")
             if len(parts) >= 4 and parts[3].startswith("networkInterfaces/"):
-                azure_nic_ips.setdefault(parts[3].split("/", 1)[1], parts[0].strip())
+                azure_nic_ips.setdefault(parts[3].split("/", 1)[1].lower(), parts[0].strip())
 
     azure_nsg_file = ctx.azure_dir / "nsg_internet_rules.tsv"
     if azure_nsg_file.is_file():
@@ -687,7 +688,7 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 nic_names = [n for n in (parts[5].split(",") if len(parts) > 5 else []) if n]
                 nsg_id = parts[6].strip() if len(parts) > 6 else ""
                 if SENSITIVE_PORTS_RE.search(ports):
-                    ips = [azure_nic_ips[n] for n in nic_names if n in azure_nic_ips]
+                    ips = list(dict.fromkeys(azure_nic_ips[n.lower()] for n in nic_names if n.lower() in azure_nic_ips))
                     add(
                         "medium",
                         f"nsg:{nsg}:{rule}",

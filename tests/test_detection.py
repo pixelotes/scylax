@@ -66,7 +66,7 @@ class TestTriageRules(unittest.TestCase):
             (ctx.azure_dir / "public_ips.tsv").write_text(
                 "93.184.216.34\tvm-runner-ip\trg-ci\tnetworkInterfaces/vm-runner-nic\n", encoding="utf-8")
             (ctx.azure_dir / "nsg_internet_rules.tsv").write_text(
-                "runner-nsg\trg-ci\tallow-ssh\t22\t1\tvm-runner-nic\t/subscriptions/x/nsg/runner-nsg\n"
+                "runner-nsg\trg-ci\tallow-ssh\t22\t1\tVM-RUNNER-NIC\t/subscriptions/x/nsg/runner-nsg\n"
                 "other-nsg\trg-ci\tallow-rdp\t3389\t0\t\t/subscriptions/x/nsg/other-nsg\n",
                 encoding="utf-8")
             (ctx.osint_dir / "hibp_account_breaches.tsv").write_text(
