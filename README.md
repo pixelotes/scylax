@@ -1,5 +1,7 @@
 # Scylax — Digital Attack Surface Cartography tool
 
+[![CI](https://github.com/pixelotes/scylax/actions/workflows/ci.yml/badge.svg)](https://github.com/pixelotes/scylax/actions/workflows/ci.yml)
+
 ```text
    ███████╗ ██████╗██╗   ██╗██╗      █████╗ ██╗  ██╗
    ██╔════╝██╔════╝╚██╗ ██╔╝██║     ██╔══██╗╚██╗██╔╝

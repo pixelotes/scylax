@@ -1,0 +1,52 @@
+name: CI
+
+# Minimal pipeline: run the test suite and verify the Docker image builds.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run tests
+        # Scylax is pure stdlib; tests use synthetic data and mock all tools/network.
+        env:
+          NO_VENV: "1"
+        run: python -m unittest discover -s tests -v
+
+  docker:
+    name: Docker image (core target)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build core image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: core
+          push: false
+          load: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
