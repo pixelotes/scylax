@@ -112,6 +112,36 @@ def _escape_md_cell(text: str) -> str:
     return text.replace("|", "\\|").replace("\r", "").replace("\n", " ")
 
 
+def nsg_ports(raw: str) -> str:
+    """NSG port field as '22' or '443,80'.
+
+    Runs before the fix stored destinationPortRange glued to the JSON text of
+    destinationPortRanges ('22[]', '["443","80"]')."""
+    raw = raw.strip()
+    if "[" not in raw:
+        return raw
+    single, _, rest = raw.partition("[")
+    try:
+        ranges = [str(x) for x in json.loads("[" + rest) if x]
+    except ValueError:
+        ranges = []
+    return ",".join([single] if single else ranges)
+
+
+def _target_html(target: str) -> str:
+    """Finding target cell: URLs become links, anything else stays as code."""
+    if not target:
+        return "-"
+    out = []
+    for t in (x.strip() for x in target.split(", ")):
+        esc = html.escape(t)
+        if t.startswith(("http://", "https://")):
+            out.append(f'<a href="{esc}" target="_blank" rel="noopener noreferrer">{esc}</a>')
+        else:
+            out.append(f"<code>{esc}</code>")
+    return "<br>".join(out)
+
+
 # =====================================================================
 # Data Loader
 # =====================================================================
@@ -197,6 +227,7 @@ class RunData:
                     "key": parts[1].strip(),
                     "title": parts[2].strip(),
                     "evidence": parts[3].strip(),
+                    "target": parts[4].strip() if len(parts) > 4 else "",
                 })
             elif len(parts) >= 2:
                 sev = parts[0].strip().upper()
@@ -205,6 +236,7 @@ class RunData:
                     "key": parts[1].strip(),
                     "title": parts[2].strip() if len(parts) > 2 else parts[1].strip(),
                     "evidence": parts[3].strip() if len(parts) > 3 else "",
+                    "target": "",
                 })
 
         findings.sort(key=lambda f: (order_map.get(f["severity"], 99), f["title"].lower()))
@@ -213,7 +245,7 @@ class RunData:
     def _load_diff(self) -> tuple[str, dict[str, list[str]]]:
         diff_path = self.run_dir / "diff.md"
         content = _safe_read_text(diff_path)
-        summary: dict[str, list[str]] = {"New": [], "Resolved": [], "Persisting": []}
+        summary: dict[str, list[str]] = {"New": [], "Reappeared": [], "Resolved": [], "Not re-checked": [], "Persisting": []}
         if content:
             cur_section = ""
             for line in content.splitlines():
@@ -224,6 +256,10 @@ class RunData:
                     cur_section = "Resolved"
                 elif s.startswith("## Persisting"):
                     cur_section = "Persisting"
+                elif s.startswith("## Reappeared"):
+                    cur_section = "Reappeared"
+                elif s.startswith("## Not re-checked"):
+                    cur_section = "Not re-checked"
                 elif cur_section and s.startswith("- "):
                     summary[cur_section].append(s[2:].strip())
         return content, summary
@@ -331,6 +367,8 @@ class RunData:
         if path.is_file():
             for line in _safe_read_lines(path):
                 parts = line.split("\t")
+                if len(parts) >= 8 and parts[0].strip().lower() == "ip" and parts[4].strip().lower() == "cve":
+                    continue  # header row
                 if len(parts) >= 8:
                     try:
                         cvss_val = float(parts[5].strip()) if parts[5].strip() else 0.0
@@ -480,7 +518,7 @@ class RunData:
                     "nsg": parts[0].strip() if len(parts) > 0 else "",
                     "resource_group": parts[1].strip() if len(parts) > 1 else "",
                     "rule": parts[2].strip() if len(parts) > 2 else "",
-                    "ports": parts[3].strip() if len(parts) > 3 else "",
+                    "ports": nsg_ports(parts[3]) if len(parts) > 3 else "",
                     "attached_nics": parts[4].strip() if len(parts) > 4 else "0",
                 })
         return rules
@@ -799,14 +837,15 @@ def generate_markdown(data: RunData) -> str:
     lines.append("")
     lines.append("*All findings are automated candidates to validate through manual review, not definitive penetration test conclusions.*\n")
     if data.findings:
-        lines.append("| Severity | Finding Title | Evidence | Rule Key |")
-        lines.append("|---|---|---|---|")
+        lines.append("| Severity | Finding Title | Target | Evidence | Rule Key |")
+        lines.append("|---|---|---|---|---|")
         for f in data.findings:
             sev_badge = f"`{f['severity']}`"
             title = _escape_md_cell(f["title"])
             evidence = _escape_md_cell(f["evidence"])
             key = f"`{_escape_md_cell(f['key'])}`" if f["key"] else "-"
-            lines.append(f"| {sev_badge} | {title} | `{evidence}` | {key} |")
+            target = _escape_md_cell(f.get("target", "")) or "-"
+            lines.append(f"| {sev_badge} | {title} | {target} | `{evidence}` | {key} |")
     else:
         lines.append("*No automated finding candidates identified for this run.*")
     lines.append("")
@@ -1839,7 +1878,7 @@ def generate_html(data: RunData) -> str:
             <button class="filter-pill" data-filter="LOW">Low ({k['low']})</button>
             <button class="filter-pill" data-filter="INFO">Info ({k['info']})</button>
           </div>
-          <input type="text" class="search-input" id="finding-search-input" placeholder="Search title, key, evidence...">
+          <input type="text" class="search-input" id="finding-search-input" placeholder="Search title, target, key, evidence...">
         </div>
 
         <div class="table-responsive">
@@ -1848,17 +1887,19 @@ def generate_html(data: RunData) -> str:
               <tr>
                 <th style="width: 110px;">Severity</th>
                 <th>Finding Title</th>
+                <th>Target</th>
                 <th>Affected Asset / Evidence</th>
                 <th style="width: 220px;">Rule Key</th>
               </tr>
             </thead>
             <tbody>
-              {"".join(f'''<tr class="finding-row" data-severity="{f['severity']}" data-text="{html.escape(f['title'].lower())} {html.escape(f['key'].lower())} {html.escape(f['evidence'].lower())}">
+              {"".join(f'''<tr class="finding-row" data-severity="{f['severity']}" data-text="{html.escape(f['title'].lower())} {html.escape(f.get('target', '').lower())} {html.escape(f['key'].lower())} {html.escape(f['evidence'].lower())}">
                 <td><span class="badge badge-{f['severity'].lower()}">{f['severity']}</span></td>
                 <td><strong>{html.escape(f['title'])}</strong></td>
+                <td class="mono">{_target_html(f.get('target', ''))}</td>
                 <td class="mono"><code>{html.escape(f['evidence'])}</code></td>
                 <td><code class="pill">{html.escape(f['key'])}</code></td>
-              </tr>''' for f in data.findings) if data.findings else "<tr><td colspan='4' class='empty-state'>No candidate findings identified</td></tr>"}
+              </tr>''' for f in data.findings) if data.findings else "<tr><td colspan='5' class='empty-state'>No candidate findings identified</td></tr>"}
             </tbody>
           </table>
           <div id="findings-no-results" class="empty-state" style="display: none;">No findings match your filter criteria.</div>

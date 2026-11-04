@@ -43,8 +43,13 @@ class Logger:
         self._c("33", f"[!] {msg}")
         if self.gaps_file is not None:
             self.gaps_file.parent.mkdir(parents=True, exist_ok=True)
-            with self.gaps_file.open("a", encoding="utf-8") as f:
-                f.write(f"{msg}\n")
+            existing = (
+                self.gaps_file.read_text(encoding="utf-8", errors="replace").splitlines()
+                if self.gaps_file.is_file() else []
+            )
+            if msg not in existing:
+                with self.gaps_file.open("a", encoding="utf-8") as f:
+                    f.write(f"{msg}\n")
 
     def error(self, msg: str) -> None:
         self._c("31", f"[-] {msg}")
@@ -145,6 +150,27 @@ def record_virtual_cmd(
         f.write(json.dumps(record) + "\n")
 
 
+def reset_phase_console(console_dir: Path, phase: str) -> None:
+    """Drop a phase's previous evidence so re-running it in the same run dir
+    replaces its console output instead of appending a duplicate copy."""
+    log_path = console_dir / f"{phase}.log"
+    if log_path.is_file():
+        log_path.unlink()
+    jsonl_path = console_dir / "commands.jsonl"
+    if not jsonl_path.is_file():
+        return
+    kept: list[str] = []
+    for line in jsonl_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            if str(json.loads(line).get("phase")) == str(phase):
+                continue
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        if line.strip():
+            kept.append(line)
+    jsonl_path.write_text("".join(f"{l}\n" for l in kept), encoding="utf-8")
+
+
 def ev(
     console_dir: Path,
     phase: str,
@@ -207,7 +233,11 @@ def http_get(
     verify_ssl: bool = True,
     follow_redirects: bool = True,
     method: str = "GET",
+    max_bytes: int | None = None,
 ) -> HttpResponse:
+    """GET a URL. ``max_bytes`` caps how much of the body is read (and asks the
+    server for that range), so probes can classify a response without
+    downloading it."""
     ctx = ssl.create_default_context()
     if not verify_ssl:
         ctx.check_hostname = False
@@ -219,6 +249,8 @@ def http_get(
 
     opener = urllib.request.build_opener(*handlers)
     req_headers = {"User-Agent": "Scylax/1.0"}
+    if max_bytes:
+        req_headers["Range"] = f"bytes=0-{max_bytes - 1}"
     if headers:
         req_headers.update(headers)
     req = urllib.request.Request(
@@ -228,7 +260,7 @@ def http_get(
     )
     try:
         with opener.open(req, timeout=timeout) as resp:
-            raw_bytes = resp.read() if method != "HEAD" else b""
+            raw_bytes = resp.read(max_bytes) if method != "HEAD" else b""
             headers = {k.lower(): v for k, v in resp.headers.items()}
             return HttpResponse(
                 status=resp.status,
@@ -239,7 +271,7 @@ def http_get(
             )
     except urllib.error.HTTPError as exc:
         try:
-            err_body = exc.read().decode("utf-8", errors="replace") if method != "HEAD" else ""
+            err_body = exc.read(max_bytes).decode("utf-8", errors="replace") if method != "HEAD" else ""
         except Exception:
             err_body = ""
         headers = {k.lower(): v for k, v in exc.headers.items()} if exc.headers else {}

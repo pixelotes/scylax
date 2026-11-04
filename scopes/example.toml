@@ -41,6 +41,17 @@ edge_ports = "21,22,23,53,80,443,8291"
 # IPs strictly excluded from active scanning (third-party hosts, shared PaaS, customer endpoints).
 exclude_ips = []
 
+# Ownership allowlist (recommended). When set, auto-discovered IPs are only
+# port-scanned / nuclei-scanned if they fall inside these IPs/CIDRs, hvt_ips,
+# edge_ips, owned_ips_file or a cloud *_inventory_file. Anything else (CDNs,
+# SaaS, shared cloud front-ends) is recorded in osint/skipped_targets.tsv.
+owned_ranges = [
+    "198.51.100.0/24",
+]
+# One IP/CIDR per line (first column; '#' comments), e.g. an export of
+# `az network public-ip list --query "[].ipAddress" -o tsv`.
+# owned_ips_file = "scopes/contoso_owned_ips.txt"
+
 # Organizations trusted to host apex domains (avoids flagging known CDN/SaaS providers as rogue apexes).
 apex_trusted_orgs = ["HubSpot", "Cloudflare", "Microsoft Corporation", "Amazon"]
 
@@ -50,6 +61,9 @@ skip_portscan_orgs = [
     "Fastly",
     "Akamai",
     "Amazon CloudFront",
+    'cloudfront\.net',  # PTR of CloudFront edges
+    "AMAZON-CF",
+    "akamaitechnologies",
     "HubSpot",
     "GitHub",
     "Vercel",
@@ -59,8 +73,10 @@ skip_portscan_orgs = [
 ]
 
 [azure]
-# Phase A (grey-box Azure assessment).
-# Subscriptions to query via Azure Resource Graph (leave empty for all subscriptions in the active tenant).
+# Phase A (grey-box Azure assessment). Cloud annexes are opt-in: A runs only when
+# this section is filled in (or when named explicitly, e.g. -p "A T", which then
+# queries every subscription in the active tenant).
+# Subscriptions to query via Azure Resource Graph.
 azure_subscriptions = [
     "sub-contoso-production-01",
     "sub-contoso-security-01",
@@ -70,7 +86,7 @@ azure_subscriptions = [
 azure_inventory_file = ""
 
 [gcp]
-# Phase G (grey-box GCP assessment).
+# Phase G (grey-box GCP assessment). Opt-in: runs only when this section is filled in or with -p G.
 # GCP project IDs to query for external IPs, forwarding rules, and VPC firewalls.
 gcp_projects = [
     "contoso-ecommerce-prod",
@@ -81,7 +97,7 @@ gcp_projects = [
 gcp_inventory_file = ""
 
 [aws]
-# Phase W (grey-box AWS assessment).
+# Phase W (grey-box AWS assessment). Opt-in: runs only when this section is filled in or with -p W.
 # AWS CLI profile names and regions to query for Elastic IPs, ALBs, RDS, and Security Groups.
 aws_profiles = ["contoso-security"]
 aws_regions = ["us-east-1", "eu-west-1"]

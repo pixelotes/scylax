@@ -6,10 +6,12 @@ import csv
 import json
 from pathlib import Path
 import re
+import urllib.parse
 
 from recon.config import RunContext
 from recon.deps import DependencyManager
-from recon.report import generate_reports
+from recon.report import generate_reports, nsg_ports
+from recon.webprobe import is_hash_label, is_ingress_default_404
 from recon.runner import (
     Logger,
     http_get,
@@ -50,9 +52,25 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     ctx.ensure_dirs()
 
     candidates: list[tuple[str, str, str, str]] = []
+    key_index: dict[str, int] = {}
+    targets: dict[str, str] = {}
 
-    def add(severity: str, key: str, title: str, evidence: str) -> None:
-        candidates.append((severity.lower().strip(), key.strip(), title.strip(), evidence.strip()))
+    def add(severity: str, key: str, title: str, evidence: str, target: str = "") -> None:
+        """One candidate per rule key; extra evidence (e.g. other ports) is merged.
+
+        target is the IP / URL to look at; when empty it is derived from the key."""
+        key = key.strip()
+        evidence = evidence.strip()
+        if target and key not in targets:
+            targets[key] = target.strip()
+        if key in key_index:
+            i = key_index[key]
+            sev0, _, title0, ev0 = candidates[i]
+            if evidence and evidence not in ev0.split("; "):
+                candidates[i] = (sev0, key, title0, f"{ev0}; {evidence}" if ev0 else evidence)
+            return
+        key_index[key] = len(candidates)
+        candidates.append((severity.lower().strip(), key, title.strip(), evidence))
 
     # ------------------------------------------------------------------
     # 2. DNS & Mail Posture per domain
@@ -146,6 +164,14 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                     if parts and parts[0].strip():
                         known_ips.add(parts[0].strip())
 
+        ip_org_map: dict[str, str] = {}
+        ip_orgs_file = ctx.osint_dir / "ip_orgs.tsv"
+        if ip_orgs_file.is_file():
+            for l in ip_orgs_file.read_text(encoding="utf-8", errors="replace").splitlines():
+                cols = l.split("\t")
+                if len(cols) >= 2 and cols[1].strip():
+                    ip_org_map[cols[0].strip()] = cols[1].strip()
+
         apex_text = apex_file.read_text(encoding="utf-8", errors="replace")
         blocks: list[tuple[str, str, list[str]]] = []
         cur_d = ""
@@ -181,6 +207,8 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                         org = m_net.group(1).strip()
                         break
 
+            if not org:
+                org = ip_org_map.get(ip, "")
             trusted_re = ctx.scope.apex_trusted_orgs_regex
             is_trusted = False
             if ctx.scope.apex_trusted_orgs and org and trusted_re:
@@ -230,7 +258,7 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                         f"Sensitive configuration/source exposed ({category})",
                         f"{url} ({snippet})",
                     )
-                elif category in ("api-schema", "graphql", "apache-status", "wp-users", "actuator"):
+                elif category in ("api-schema", "api-docs", "graphql", "apache-status", "wp-users", "actuator"):
                     add(
                         "medium",
                         f"exposed-api:{url}",
@@ -245,6 +273,102 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                         f"{url} ({snippet})",
                     )
 
+    # Data files served without authentication: at the web root, inside a
+    # directory listing, or behind an OpenAPI-described endpoint.
+    def _kb(size: str) -> str:
+        return f"{int(size) // 1024} KB" if size.isdigit() else "size unknown"
+
+    root_file = ctx.web_dir / "root_data.tsv"
+    if root_file.is_file():
+        for line in root_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            parts = line.split("\t")
+            if len(parts) < 3:
+                continue
+            url, ctype, size = parts[0], parts[1], parts[2]
+            cols = parts[3] if len(parts) > 3 else ""
+            sensitive = parts[4] if len(parts) > 4 else ""
+            host = urllib.parse.urlparse(url).hostname or url
+            if sensitive:
+                add("critical", f"data-export:{host}", "Unauthenticated data export with personal or secret fields",
+                    f"{url} ({ctype}, {_kb(size)}; fields: {sensitive})")
+            else:
+                add("high", f"data-export:{host}", "Unauthenticated data file served",
+                    f"{url} ({ctype}, {_kb(size)}; columns: {cols[:120]})")
+
+    api_file = ctx.web_dir / "api_endpoints.tsv"
+    if api_file.is_file():
+        for line in api_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            parts = line.split("\t")
+            if len(parts) < 4 or parts[1] not in ("200", "206"):
+                continue
+            url, _, ctype, size = parts[:4]
+            sensitive = parts[4] if len(parts) > 4 else ""
+            host = urllib.parse.urlparse(url).hostname or url
+            bulky = size.isdigit() and int(size) >= 10 * 1024
+            if sensitive:
+                add("critical", f"api-data:{host}", "Unauthenticated API endpoint returns personal or secret data",
+                    f"{url} ({ctype}, {_kb(size)}; fields: {sensitive})")
+            elif bulky or any(t in ctype for t in ("csv", "octet-stream", "spreadsheet")):
+                add("high", f"api-data:{host}", "Unauthenticated API endpoint returns bulk data",
+                    f"{url} ({ctype}, {_kb(size)})")
+
+    # Hostnames that only rely on being unguessable. TLS certificates publish
+    # every hostname in Certificate Transparency logs, so a hashed name is not
+    # a secret: flag the ones that answer without authentication.
+    ct_seen: dict[str, str] = {}
+    ct_file = ctx.osint_dir / "ct_first_seen.tsv"
+    if ct_file.is_file():
+        for line in ct_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            cols = line.split("\t")
+            if len(cols) == 2:
+                ct_seen[cols[0]] = cols[1]
+    httpx_meta: dict[str, tuple[str, str, str]] = {}
+    httpx_json_file = ctx.web_dir / "httpx_all.json"
+    if httpx_json_file.is_file():
+        for line in httpx_json_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            h = urllib.parse.urlparse(str(item.get("url") or "")).hostname or ""
+            httpx_meta[h] = (
+                str(item.get("content_type") or ""),
+                str(item.get("title") or ""),
+                str(item.get("webserver") or ""),
+            )
+    httpx_all_file = ctx.web_dir / "httpx_all.txt"
+    if httpx_all_file.is_file():
+        for line in httpx_all_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            m = re.match(r"^(\S+)\s+\[(\d{3})\]", line)
+            if not m:
+                continue
+            host = urllib.parse.urlparse(m.group(1)).hostname or ""
+            code = int(m.group(2))
+            if not is_hash_label(host) or code in (401, 403, 407):
+                continue
+            ct, title, server = httpx_meta.get(host, ("", "", ""))
+            if code >= 500 or is_ingress_default_404(code, ct, title, server):
+                continue
+            first = ct_seen.get(host, "")
+            add(
+                "medium",
+                f"hash-host:{host}",
+                "Service protected only by an unguessable hostname (public in CT logs)",
+                f"{host} [{code}]" + (f", first certificate {first}" if first else ""),
+            )
+
+    new_subs_file = ctx.osint_dir / "new_subdomains.txt"
+    if new_subs_file.is_file():
+        new_subs = [l.strip() for l in new_subs_file.read_text(encoding="utf-8").splitlines() if l.strip()]
+        if new_subs:
+            hashed = [h for h in new_subs if is_hash_label(h)]
+            add(
+                "info",
+                "new-hostnames",
+                f"{len(new_subs)} new hostnames since the previous run ({len(hashed)} hash-like)",
+                ", ".join((hashed + [h for h in new_subs if h not in hashed])[:12]),
+            )
+
     cors_file = ctx.web_dir / "cors_cookies.tsv"
     if cors_file.is_file():
         for line in cors_file.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -257,6 +381,45 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                     add("medium", f"cors:{url}", "Permissive CORS policy detected", f"{url}: {detail}")
                 else:
                     add("low", f"cookie:{url}", "Session cookie missing security flags", f"{url}: {detail}")
+
+    # Vanity redirects that disclose the Entra tenant / app IDs and the SaaS map
+    httpx_txt = ctx.web_dir / "httpx_all.txt"
+    if httpx_txt.is_file():
+        tenants: set[str] = set()
+        saas_hosts: set[str] = set()
+        sources: list[str] = []
+        own_suffixes = tuple(f".{d}" for d in ctx.scope.domains) + tuple(ctx.scope.domains)
+        for line in httpx_txt.read_text(encoding="utf-8", errors="replace").splitlines():
+            m = re.match(r"^(\S+)\s+\[(30[1278])\].*\[([^\]]*)\]\s*$", line.strip())
+            if not m or not m.group(3).startswith("http"):
+                continue
+            loc = m.group(3)
+            loc_host = (urllib.parse.urlparse(loc).hostname or "").lower()
+            if not loc_host or loc_host.endswith(own_suffixes):
+                continue
+            tid = re.search(
+                r"(?i)(?:tenantId=|login\.microsoftonline\.com/)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
+                loc,
+            )
+            if tid:
+                tenants.add(tid.group(1).lower())
+            saas_hosts.add(loc_host)
+            sources.append(urllib.parse.urlparse(m.group(1)).hostname or m.group(1))
+        if tenants:
+            add(
+                "medium",
+                "redirect-tenant-leak",
+                "Vanity redirects disclose Entra tenant / app IDs and SaaS map",
+                f"tenant {', '.join(sorted(tenants))}; {len(set(sources))} hosts -> "
+                f"{', '.join(sorted(saas_hosts)[:8])}",
+            )
+        elif len(saas_hosts) >= 3:
+            add(
+                "low",
+                "redirect-saas-map",
+                "Vanity redirects disclose the SaaS map",
+                f"{len(set(sources))} hosts -> {', '.join(sorted(saas_hosts)[:8])}",
+            )
 
     entry_file = ctx.osint_dir / "entry_points.tsv"
     if entry_file.is_file():
@@ -283,6 +446,14 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     # ------------------------------------------------------------------
     # 6. Nmap Service Scans
     # ------------------------------------------------------------------
+    MGMT_UI_RE = re.compile(
+        r"\b(?:OPNsense|pfSense|FortiGate|FortiOS|Fortinet|Sophos|SonicWALL|WatchGuard|"
+        r"WebFig|RouterOS|MikroTik|Ubiquiti|UniFi|Webmin|Proxmox|VMware ESXi|vCenter|"
+        r"iDRAC|Integrated Lights-Out|iLO|Supermicro|Synology|QNAP|cPanel|Plesk|"
+        r"phpMyAdmin|Jenkins|Grafana|Kibana|Portainer|RabbitMQ Management|Tomcat Manager)\b",
+        re.IGNORECASE,
+    )
+
     MGMT_PORTS = {
         21,
         23,
@@ -387,13 +558,19 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 add("low", f"fakecert:{ip}", "Default Kubernetes ingress certificate", ip)
 
             # Firewall admin GUI
-            m_fw = re.search(r"Login\s*\|\s*OPNsense|pfSense|FortiGate|Sophos|WebFig|RouterOS", block)
+            mgmt_lines = [
+                l for l in block.splitlines()
+                if re.match(r"^\d+/tcp\s+open\b", l.strip()) or "http-title" in l
+            ]
+            m_fw = MGMT_UI_RE.search("\n".join(mgmt_lines))
             if m_fw:
+                port_m = re.search(r"^(\d+)/tcp\s+open\b.*" + re.escape(m_fw.group(0)), block, re.M)
+                where = f"{ip}:{port_m.group(1)}" if port_m else ip
                 add(
                     "high",
                     f"fw-admin:{ip}",
-                    "Firewall / router admin GUI on the internet",
-                    m_fw.group(0),
+                    "Firewall / router / server management interface on the internet",
+                    f"{where} {m_fw.group(0)}",
                 )
 
             # Expired TLS cert
@@ -469,10 +646,14 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                         if cve_code not in seen_top:
                             seen_top.add(cve_code)
                             top_cves.append(cve_code)
+                    # Distro packages (Ubuntu/Debian/RHEL...) backport fixes without
+                    # changing the upstream version: version-matched CVEs need checking.
+                    distro = re.search(r"(?i)ubuntu|debian|deb\d|\.el\d|rhel|centos|suse|alpine", service_ver)
                     add(
-                        "high",
+                        "medium" if distro else "high",
                         f"cve-high:{ip_cve}:{port_cve}",
-                        f"High-severity CVEs (max CVSS {max_cvss}) on {service_ver}".strip(),
+                        f"High-severity CVEs (max CVSS {max_cvss}) on {service_ver}".strip()
+                        + (" - distro build, verify backports" if distro else ""),
                         f"{ip_cve}:{port_cve} -> {', '.join(top_cves[:5])}",
                     )
 
@@ -484,6 +665,16 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         re.IGNORECASE,
     )
 
+    # Public IP per NIC ("networkInterfaces/<nic>" in public_ips.tsv), to point NSG findings at an address.
+    # Azure resource names are case-insensitive and both APIs spell them differently.
+    azure_nic_ips: dict[str, str] = {}
+    azure_ips_file = ctx.azure_dir / "public_ips.tsv"
+    if azure_ips_file.is_file():
+        for line in azure_ips_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            parts = line.strip().split("\t")
+            if len(parts) >= 4 and parts[3].startswith("networkInterfaces/"):
+                azure_nic_ips.setdefault(parts[3].split("/", 1)[1].lower(), parts[0].strip())
+
     azure_nsg_file = ctx.azure_dir / "nsg_internet_rules.tsv"
     if azure_nsg_file.is_file():
         for line in azure_nsg_file.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -492,14 +683,18 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 nsg = parts[0].strip()
                 rg = parts[1].strip()
                 rule = parts[2].strip()
-                ports = parts[3].strip()
+                ports = nsg_ports(parts[3])
                 nics = parts[4].strip() if len(parts) > 4 else "0"
+                nic_names = [n for n in (parts[5].split(",") if len(parts) > 5 else []) if n]
+                nsg_id = parts[6].strip() if len(parts) > 6 else ""
                 if SENSITIVE_PORTS_RE.search(ports):
+                    ips = list(dict.fromkeys(azure_nic_ips[n.lower()] for n in nic_names if n.lower() in azure_nic_ips))
                     add(
                         "medium",
                         f"nsg:{nsg}:{rule}",
                         f"Azure NSG allows {ports} from Internet",
                         f"{rg}/{nsg} rule {rule} (nics: {nics})",
+                        target=", ".join(ips) or (f"https://portal.azure.com/#@/resource{nsg_id}" if nsg_id else ""),
                     )
 
     gcp_fw_file = ctx.gcp_dir / "firewall_internet_rules.tsv"
@@ -518,6 +713,7 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                         f"gcp-fw:{project}:{name}",
                         f"GCP VPC firewall allows {ports} from Internet",
                         f"{project}/{network} rule {name} (tags: {tags})",
+                        target=f"https://console.cloud.google.com/net-security/firewall-manager/firewall-policies/details/{name}?project={project}",
                     )
 
     aws_sg_file = ctx.aws_dir / "sg_internet_rules.tsv"
@@ -536,6 +732,7 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                         f"aws-sg:{gid}",
                         f"AWS Security Group allows {ports} from Internet",
                         f"{gname} ({gid}) in {reg} (cidr: {cidr})",
+                        target=f"https://console.aws.amazon.com/ec2/home?region={reg}#SecurityGroup:groupId={gid}",
                     )
 
     # ------------------------------------------------------------------
@@ -690,8 +887,8 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 add(
                     sev,
                     f"hibp-account:{b_email}:{b_name}",
-                    f"Compromised corporate email: {b_email} in {b_title} ({b_date})",
-                    f"Exposed data: {b_classes}",
+                    f"Compromised corporate email: {b_email} in {b_title} ({b_date or 'date unknown'})",
+                    f"Exposed data: {b_classes.replace(';', '; ') or 'unknown (not published for this breach)'}",
                 )
 
     # ------------------------------------------------------------------
@@ -704,6 +901,8 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         "low": 3,
         "info": 4,
     }
+
+    candidates[:] = _fold_per_host(candidates, SEVERITY_ORDER)
 
     seen_candidates: set[tuple[str, str, str, str]] = set()
     deduped: list[tuple[str, str, str, str]] = []
@@ -722,7 +921,10 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     deduped.sort(key=lambda x: (SEVERITY_ORDER.get(x[0], 99), x[1], x[2]))
 
     # Write findings_auto.tsv
-    tsv_lines = [f"{sev}\t{key}\t{title}\t{ev}\n" for sev, key, title, ev in deduped]
+    def target_of(key: str) -> str:
+        return targets.get(key) or finding_target(key)
+
+    tsv_lines = [f"{sev}\t{key}\t{title}\t{ev}\t{target_of(key)}\n" for sev, key, title, ev in deduped]
     (ctx.run_dir / "findings_auto.tsv").write_text("".join(tsv_lines), encoding="utf-8")
 
     # Write findings_auto.md
@@ -731,13 +933,14 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         "",
         "Validate every line by hand before it goes into the report.",
         "",
-        "| Severity | Finding | Evidence | Key |",
-        "|---|---|---|---|",
+        "| Severity | Finding | Target | Evidence | Key |",
+        "|---|---|---|---|---|",
     ]
     for sev, key, title, ev in deduped:
         esc_title = title.replace("|", "\\|")
         esc_ev = ev.replace("|", "\\|")
-        md_lines.append(f"| {sev} | {esc_title} | {esc_ev} | `{key}` |")
+        esc_target = target_of(key).replace("|", "\\|")
+        md_lines.append(f"| {sev} | {esc_title} | {esc_target} | {esc_ev} | `{key}` |")
 
     gaps_file = ctx.run_dir / "gaps.txt"
     if gaps_file.is_file():
@@ -756,52 +959,60 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
     (ctx.run_dir / "findings_auto.md").write_text("\n".join(md_lines) + "\n", encoding="utf-8")
 
-    # Diff against previous run if available
+    # Diff against the previous run and the scope-wide finding history
+    curr_map: dict[str, tuple[str, str, str, str]] = {}
+    for item in deduped:
+        curr_map.setdefault(item[1], item)
+    history = _update_history(ctx, curr_map)
+
     if ctx.prev_run_dir is not None and (ctx.prev_run_dir / "findings_auto.tsv").is_file():
         prev_tsv = ctx.prev_run_dir / "findings_auto.tsv"
         prev_map: dict[str, tuple[str, str, str, str]] = {}
         for line in prev_tsv.read_text(encoding="utf-8", errors="replace").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            parts = line.split("\t")
+            parts = line.strip().split("\t")
             if len(parts) >= 4:
-                k = parts[1].strip()
-                if k not in prev_map:
-                    prev_map[k] = (
-                        parts[0].strip(),
-                        k,
-                        parts[2].strip(),
-                        parts[3].strip(),
-                    )
+                prev_map.setdefault(parts[1].strip(), (parts[0].strip(), parts[1].strip(), parts[2].strip(), parts[3].strip()))
 
-        curr_map: dict[str, tuple[str, str, str, str]] = {}
-        for item in deduped:
-            k = item[1]
-            if k not in curr_map:
-                curr_map[k] = item
+        curr_phases = _run_phases(ctx.run_dir)
+        prev_phases = _run_phases(ctx.prev_run_dir)
+        prev_keys = set(prev_map)
+        curr_keys = set(curr_map)
 
-        prev_keys = set(prev_map.keys())
-        curr_keys = set(curr_map.keys())
+        def _checked_in_both(key: str) -> bool:
+            ph = finding_phase(key)
+            # Unknown origin, or run.meta missing: assume it was checked
+            return ph is None or not curr_phases or not prev_phases or (ph in curr_phases and ph in prev_phases)
 
-        new_keys = sorted(curr_keys - prev_keys)
-        resolved_keys = sorted(prev_keys - curr_keys)
+        gone = prev_keys - curr_keys
+        resolved_keys = sorted(k for k in gone if _checked_in_both(k))
+        unchecked_keys = sorted(k for k in gone if not _checked_in_both(k))
+        new_all = curr_keys - prev_keys
+        reappeared_keys = sorted(k for k in new_all if len(history.get(k, {}).get("seen", [])) > 1)
+        new_keys = sorted(k for k in new_all if k not in reappeared_keys)
         persisting_keys = sorted(curr_keys & prev_keys)
 
-        diff_lines: list[str] = [
-            f"# Changes {ctx.prev_run_dir.name} -> {ctx.run_date}",
-        ]
-        for section_name, keys, src in (
-            ("New", new_keys, curr_map),
-            ("Resolved", resolved_keys, prev_map),
-            ("Persisting", persisting_keys, curr_map),
+        def _age(key: str) -> str:
+            h = history.get(key, {})
+            seen = h.get("seen", [])
+            return f" _(open since {h.get('first_seen', '?')}, {len(seen)} runs)_" if seen else ""
+
+        diff_lines: list[str] = [f"# Changes {ctx.prev_run_dir.name} -> {ctx.run_date}"]
+        for section_name, keys, src, with_age in (
+            ("New", new_keys, curr_map, False),
+            ("Reappeared", reappeared_keys, curr_map, True),
+            ("Resolved", resolved_keys, prev_map, False),
+            ("Not re-checked", unchecked_keys, prev_map, False),
+            ("Persisting", persisting_keys, curr_map, True),
         ):
             diff_lines.append("")
             diff_lines.append(f"## {section_name} ({len(keys)})")
             diff_lines.append("")
-            for k in keys:
+            if section_name == "Not re-checked" and keys:
+                diff_lines.append("_The phase that produces these was not run this time; status unknown._")
+                diff_lines.append("")
+            for k in sorted(keys, key=lambda x: (SEVERITY_ORDER.get(src[x][0], 99), x)):
                 f_item = src[k]
-                diff_lines.append(f"- **{f_item[0]}** {f_item[2]} - {f_item[3]}")
+                diff_lines.append(f"- **{f_item[0]}** {f_item[2]} - {f_item[3]}" + (_age(k) if with_age else ""))
 
         (ctx.run_dir / "diff.md").write_text("\n".join(diff_lines) + "\n", encoding="utf-8")
         log.ok(f"diff vs {ctx.prev_run_dir.name} in diff.md")
@@ -816,3 +1027,135 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
     md_path, html_path = generate_reports(ctx.run_dir)
     log.ok(f"{len(deduped)} candidates -> findings_auto.md, report.md, report.html")
+
+
+# Which phase produces each finding key (by prefix). Used so that a run that
+# skipped a phase does not report that phase's findings as "resolved".
+_PHASE_BY_PREFIX: tuple[tuple[str, str], ...] = (
+    ("new-hostnames", "1"),
+    ("spf:", "2"), ("dmarc:", "2"), ("caa:", "2"), ("dnssec:", "2"), ("axfr:", "2"),
+    ("wildcard:", "2"), ("whois:", "2"), ("apex:", "2"), ("internal-name:", "2"),
+    ("dirlist:", "3"), ("exposed-path:", "3"), ("exposed-api:", "3"), ("robots:", "3"),
+    ("cors:", "3"), ("cookie:", "3"), ("headers:", "3"), ("data-export:", "3"),
+    ("api-data:", "3"), ("hash-host:", "3"), ("redirect-", "3"),
+    ("mgmt:", "4"), ("ssh:", "4"), ("ssh-weak:", "4"), ("apache:", "4"), ("nginx:", "4"),
+    ("routeros:", "4"), ("fakecert:", "4"), ("fw-admin:", "4"), ("cert-expired:", "4"), ("502:", "4"),
+    ("entrypoint:", "6"), ("wayback-", "6"),
+    ("cve-", "7"),
+    ("nuclei:", "8"),
+)
+
+
+def finding_phase(key: str) -> str | None:
+    for prefix, phase in _PHASE_BY_PREFIX:
+        if key.startswith(prefix):
+            return phase
+    return None
+
+
+def _run_phases(run_dir: Path) -> set[str]:
+    meta = run_dir / "run.meta"
+    if not meta.is_file():
+        return set()
+    for line in meta.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith("phases="):
+            phases = set(line[len("phases="):].split())
+            # Phase 4b (edge devices) produces the same finding types as 4
+            if "4b" in phases:
+                phases.add("4")
+            return phases
+    return set()
+
+
+def _update_history(ctx: RunContext, curr_map: dict[str, tuple[str, str, str, str]]) -> dict[str, dict]:
+    """Record in runs/<scope>/findings_history.json the run dates each finding
+    key was seen on, so persisting and reappearing findings can be aged."""
+    path = ctx.root / "runs" / ctx.scope.name / "findings_history.json"
+    try:
+        history = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except (json.JSONDecodeError, OSError):
+        history = {}
+    for key, (sev, _, title, _) in curr_map.items():
+        h = history.setdefault(key, {"first_seen": ctx.run_date, "seen": []})
+        if ctx.run_date not in h["seen"]:
+            h["seen"].append(ctx.run_date)
+            h["seen"].sort()
+        h["first_seen"] = min(h["first_seen"], ctx.run_date)
+        h["severity"], h["title"] = sev, title
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(history, indent=1, sort_keys=True), encoding="utf-8")
+    except OSError:
+        pass
+    return history
+
+
+# Web findings about the same host are folded into its most severe one, so a
+# single exposed service shows up once (with the rest as supporting evidence)
+# instead of as a directory listing + data file + API docs + hashed name.
+_IP_KEY_PREFIXES = ("502:", "apache:", "cert-expired:", "fakecert:", "fw-admin:", "nginx:",
+                    "routeros:", "ssh:", "ssh-weak:")
+_URL_KEY_PREFIXES = ("cookie:", "cors:", "dirlist:", "exposed-api:", "exposed-path:", "robots:")
+_HOST_KEY_PREFIXES = ("api-data:", "data-export:", "hash-host:")
+_DOMAIN_KEY_PREFIXES = ("apex:", "axfr:", "caa:", "dmarc:", "dnssec:", "spf:", "whois:", "wildcard:",
+                        "internal-name:")
+
+
+def finding_target(key: str) -> str:
+    """The IP, host:port or URL a finding is about, derived from its rule key.
+
+    Breach findings point at a public lookup: the account's XposedOrNot query
+    or the breach's HIBP catalogue entry. '' when the key names no resource."""
+    prefix, _, rest = key.partition(":")
+    prefix += ":"
+    if prefix in _IP_KEY_PREFIXES or prefix in _DOMAIN_KEY_PREFIXES:
+        return rest
+    if prefix in _URL_KEY_PREFIXES:
+        return rest
+    if prefix in _HOST_KEY_PREFIXES:
+        return f"https://{rest}/"
+    if prefix in ("mgmt:", "cve-kev:", "cve-high:"):
+        return rest  # ip:port
+    if prefix == "nuclei:":
+        return rest.split(":", 1)[1] if ":" in rest else rest
+    if prefix == "hibp-account:":
+        email = rest.rsplit(":", 1)[0]
+        return f"https://api.xposedornot.com/v1/check-email/{urllib.parse.quote(email)}"
+    if prefix == "hibp:":
+        breach = rest.rsplit(":", 1)[-1]
+        return f"https://haveibeenpwned.com/PwnedWebsites#{urllib.parse.quote(breach)}"
+    return ""
+
+
+_HOST_FOLD_PREFIXES = ("api-data:", "data-export:", "exposed-path:", "dirlist:", "exposed-api:", "hash-host:")
+
+
+def _fold_host(key: str) -> str | None:
+    for prefix in _HOST_FOLD_PREFIXES:
+        if key.startswith(prefix):
+            rest = key[len(prefix):]
+            return (urllib.parse.urlparse(rest).hostname or "") if "://" in rest else rest.split("/")[0]
+    return None
+
+
+def _fold_per_host(
+    candidates: list[tuple[str, str, str, str]], severity_order: dict[str, int]
+) -> list[tuple[str, str, str, str]]:
+    groups: dict[str, list[int]] = {}
+    for i, (_, key, _, _) in enumerate(candidates):
+        host = _fold_host(key)
+        if host:
+            groups.setdefault(host, []).append(i)
+    drop: set[int] = set()
+    out = list(candidates)
+    for idxs in groups.values():
+        if len(idxs) < 2:
+            continue
+        rank = lambda i: (severity_order.get(candidates[i][0], 99),
+                          [k for k in range(len(_HOST_FOLD_PREFIXES)) if candidates[i][1].startswith(_HOST_FOLD_PREFIXES[k])][0])
+        main, *rest = sorted(idxs, key=rank)
+        sev, key, title, evidence = candidates[main]
+        extra = "; ".join(f"{candidates[i][2]}: {candidates[i][3]}" for i in rest)
+        out[main] = (sev, key, title, f"{evidence} | also: {extra}")
+        drop.update(rest)
+    return [c for i, c in enumerate(out) if i not in drop]

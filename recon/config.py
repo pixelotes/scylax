@@ -12,6 +12,7 @@ from typing import List
 
 DEFAULT_PHASES: List[str] = ["1", "2", "3", "4", "4b", "5", "6", "7", "8", "9", "A", "G", "W", "S", "T"]
 ACTIVE_PHASES: set[str] = {"3", "4", "4b", "5", "8", "A", "G", "W"}
+CLOUD_PHASES: set[str] = {"A", "G", "W"}
 
 
 def _split_list(val: object) -> List[str]:
@@ -41,6 +42,9 @@ DEFAULT_SKIP_PORTSCAN_ORGS: List[str] = [
     "Fastly",
     "Akamai",
     "Amazon CloudFront",
+    r"cloudfront\.net",
+    "AMAZON-CF",
+    "akamaitechnologies",
     "HubSpot",
     "GitHub",
     "Vercel",
@@ -64,20 +68,14 @@ class ScopeConfig:
     edge_ips: List[str] = field(default_factory=list)
     edge_ports: str = "21,22,23,53,80,443,8291"
     exclude_ips: List[str] = field(default_factory=list)
+    # Ownership allowlist: when set, only discovered IPs inside these IPs/CIDRs
+    # (plus hvt_ips/edge_ips) are actively scanned. Everything else is treated
+    # as third-party hosting (CDN, SaaS, shared cloud) and left alone.
+    owned_ranges: List[str] = field(default_factory=list)
+    owned_ips_file: str = ""
     auto_discover_targets: bool = True
     skip_portscan_orgs: List[str] = field(
-        default_factory=lambda: [
-            "Cloudflare",
-            "Fastly",
-            "Akamai",
-            "Amazon CloudFront",
-            "HubSpot",
-            "GitHub",
-            "Vercel",
-            "Netlify",
-            "Squarespace",
-            "Wix",
-        ]
+        default_factory=lambda: list(DEFAULT_SKIP_PORTSCAN_ORGS)
     )
     apex_trusted_orgs: List[str] = field(default_factory=list)
     azure_subscriptions: List[str] = field(default_factory=list)
@@ -104,6 +102,28 @@ class ScopeConfig:
     min_apache: str = "2.4.65"
     min_nginx: str = "1.26.0"
     min_routeros: str = "7.15"
+
+    @property
+    def ownership_enforced(self) -> bool:
+        return bool(self.owned_ranges or self.owned_ips_file)
+
+    def owned_entries(self) -> List[str]:
+        """IPs/CIDRs we own: owned_ranges, hvt/edge IPs, and the first column of
+        owned_ips_file and any cloud inventory file ('#' starts a comment)."""
+        entries = list(self.owned_ranges) + list(self.hvt_ips) + list(self.edge_ips)
+        for f in (self.owned_ips_file, self.azure_inventory_file,
+                  self.gcp_inventory_file, self.aws_inventory_file):
+            if not f:
+                continue
+            p = Path(f)
+            if not p.is_absolute() and not p.is_file():
+                p = self.path.parent / p
+            if p.is_file():
+                for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
+                    tok = re.split(r"[\s,;]+", line.split("#", 1)[0].strip())[0]
+                    if tok:
+                        entries.append(tok)
+        return entries
 
     @property
     def apex_trusted_orgs_regex(self) -> str:
@@ -294,6 +314,8 @@ class ScopeConfig:
             edge_ips=_split_list(flat.get("edge_ips")),
             edge_ports=_ports_csv(flat.get("edge_ports"), "21,22,23,53,80,443,8291"),
             exclude_ips=_split_list(flat.get("exclude_ips")),
+            owned_ranges=_split_list(flat.get("owned_ranges")),
+            owned_ips_file=str(flat.get("owned_ips_file") or "").strip(),
             auto_discover_targets=auto_discover_targets,
             skip_portscan_orgs=skip_portscan_orgs_list,
             apex_trusted_orgs=apex_orgs_list,
@@ -342,6 +364,7 @@ class RunContext:
     saas_posture: bool = False
     quick_scan: bool = False
     top_ports: int | None = None
+    explicit_phases: bool = False
 
     def __post_init__(self) -> None:
         if self.skip_cloud:
@@ -360,6 +383,33 @@ class RunContext:
             self.shodan_api_key = self.scope.shodan_api_key
         if not self.hibp_api_key and getattr(self.scope, "hibp_api_key", ""):
             self.hibp_api_key = self.scope.hibp_api_key
+
+    def phase_skip_reason(self, phase: str) -> str:
+        """Why a requested phase will not run ('' when it will).
+
+        Cloud annexes and SaaS posture are opt-in: they run only when the scope
+        configures that provider (or the annex is named explicitly with -p), so
+        a plain external recon never probes for az/gcloud/aws/gh/gam."""
+        if self.skip_active and phase in ACTIVE_PHASES:
+            return "skip_active"
+        if phase in CLOUD_PHASES:
+            if self.skip_cloud or self.skip_azure:
+                return "skip_cloud"
+            if not self.explicit_phases and not self.cloud_configured(phase):
+                return "no cloud provider configured in scope"
+        if phase == "S" and not self.saas_posture:
+            return "SaaS posture disabled"
+        return ""
+
+    def cloud_configured(self, phase: str) -> bool:
+        sc = self.scope
+        if phase == "A":
+            return bool(sc.azure_subscriptions or sc.azure_inventory_file)
+        if phase == "G":
+            return bool(sc.gcp_projects or sc.gcp_inventory_file)
+        if phase == "W":
+            return bool(sc.aws_profiles or sc.aws_regions or sc.aws_inventory_file)
+        return True
 
     @property
     def today(self) -> str:

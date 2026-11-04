@@ -12,6 +12,8 @@ from pathlib import Path
 from recon.config import RunContext
 from recon.deps import DependencyManager
 from recon.runner import Logger, ev, http_get, record_virtual_cmd, run_cmd
+from recon.scope import guard_for, ip_in, is_public_ip, parse_networks
+from recon.webprobe import PROBE_BYTES, discover_api, is_ingress_default_404, sniff_root_data
 
 
 WELL_KNOWN_PATHS: list[tuple[str, str, str]] = [
@@ -27,7 +29,30 @@ WELL_KNOWN_PATHS: list[tuple[str, str, str]] = [
     ("/server-status", "apache-status", r"Apache Server Status for"),
     ("/wp-json/wp/v2/users", "wp-users", r'"slug"\s*:.*"name"\s*:'),
     ("/robots.txt", "robots-disallow", r"(?i)Disallow:\s*/(admin|api|backup|private|internal|config|db|v1|v2)"),
+    ("/docs", "api-docs", r"swagger-ui|SwaggerUIBundle|redoc"),
+    ("/redoc", "api-docs", r"<redoc|Redoc\.init"),
+    ("/swagger-ui/index.html", "api-docs", r"swagger-ui|SwaggerUIBundle"),
 ]
+
+
+def _native_http_probe(hosts: list[str], workers: int = 16) -> list[tuple[str, int, str, str, str, str]]:
+    """httpx-like probe in pure Python: (url, status, title, server, location, content_type)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def probe(h: str) -> tuple[str, int, str, str, str, str] | None:
+        for scheme in ("https", "http"):
+            url = f"{scheme}://{h}"
+            resp = http_get(f"{url}/", timeout=8.0, verify_ssl=False, follow_redirects=False, max_bytes=PROBE_BYTES)
+            if resp.status == 0:
+                continue
+            m = re.search(r"<title[^>]*>(.*?)</title>", resp.body, re.IGNORECASE | re.DOTALL)
+            title = re.sub(r"<[^>]*>", "", m.group(1)).strip().replace("\r", " ").replace("\n", " ") if m else ""
+            location = resp.redirect_url or resp.headers.get("location", "")
+            return (url, resp.status, title, resp.headers.get("server", ""), location, resp.headers.get("content-type", ""))
+        return None
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return [r for r in pool.map(probe, hosts) if r]
 
 
 def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
@@ -45,20 +70,30 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
             for line in resolved_file.read_text(encoding="utf-8", errors="replace").splitlines()
             if line.strip() and not line.strip().startswith("#")
         ]
+    guard = guard_for(ctx)
+    skipped = [h for h in hosts if not guard.host_allowed(h)]
+    hosts = [h for h in hosts if guard.host_allowed(h)]
+    if skipped:
+        log.info(f"Phase 3: {len(skipped)} hostnames skipped (excluded/edge/non-public IPs)")
+    httpx_targets = ctx.web_dir / "httpx_targets.txt"
+    httpx_targets.write_text("".join(f"{h}\n" for h in hosts), encoding="utf-8")
 
     httpx_all_txt = ctx.web_dir / "httpx_all.txt"
     httpx_lines: list[str] = []
+    # url -> (status, content_type, title, server)
+    url_meta: dict[str, tuple[int, str, str, str]] = {}
 
-    if dm.is_available("httpx"):
-        httpx_json = ctx.web_dir / "httpx_all.json"
-        ev(
+    httpx_json = ctx.web_dir / "httpx_all.json"
+    use_native = not dm.is_available("httpx")
+    if not use_native and hosts:
+        httpx_res = ev(
             ctx.console_dir,
             "3",
             dm.build_cmd(
                 "httpx",
                 [
                     "-l",
-                    str(resolved_file),
+                    str(httpx_targets),
                     "-sc",
                     "-title",
                     "-server",
@@ -91,28 +126,33 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                     except json.JSONDecodeError:
                         continue
                     url = str(item.get("url") or "")
+                    if not guard.url_allowed(url):
+                        continue
                     status_code = str(item.get("status_code") or item.get("status-code") or "")
                     title = str(item.get("title") or "").replace("\r", " ").replace("\n", " ")
                     webserver = str(item.get("webserver") or "")
                     location = str(item.get("location") or "")
                     httpx_lines.append(f"{url} [{status_code}] [{title}] [{webserver}] [{location}]")
-    else:
-        log.warn("httpx missing - using native Python HTTPS/HTTP probe (slower, no tech-detect)")
-        for h in hosts:
-            for scheme in ("https", "http"):
-                probe_url = f"{scheme}://{h}/"
-                resp = http_get(probe_url, timeout=8.0, verify_ssl=False, follow_redirects=False)
-                if resp.status == 0:
-                    continue
-                m = re.search(r"<title[^>]*>(.*?)</title>", resp.body, re.IGNORECASE | re.DOTALL)
-                title = ""
-                if m:
-                    title = re.sub(r"<[^>]*>", "", m.group(1)).strip().replace("\r", " ").replace("\n", " ")
-                server = resp.headers.get("server", "")
-                location = resp.redirect_url or resp.headers.get("location", "")
-                httpx_lines.append(f"{scheme}://{h} [{resp.status}] [{title}] [{server}] [{location}]")
-                break
-            time.sleep(0.05)
+                    if status_code.isdigit():
+                        url_meta[url] = (int(status_code), str(item.get("content_type") or item.get("content-type") or ""), title, webserver)
+        if not httpx_lines:
+            # A failed httpx (e.g. Docker daemon down) must not look like "no live hosts"
+            err = (httpx_res.stderr or httpx_res.stdout or "").strip().splitlines()
+            log.warn(
+                f"httpx produced no results (exit {httpx_res.returncode}: {err[-1][:120] if err else 'no output'}) "
+                "- falling back to native Python probe"
+            )
+            use_native = True
+    if use_native and hosts:
+        log.warn("httpx unavailable - using native Python HTTPS/HTTP probe (slower, no tech-detect)")
+        native = _native_http_probe(hosts, workers=16)
+        with httpx_json.open("w", encoding="utf-8") as jf:
+            for url, status, title, server, location, ctype in native:
+                httpx_lines.append(f"{url} [{status}] [{title}] [{server}] [{location}]")
+                url_meta[url] = (status, ctype, title, server)
+                # Same shape as httpx -json so later phases and triage can use it
+                jf.write(json.dumps({"url": url, "status_code": status, "title": title, "webserver": server,
+                                     "location": location, "content_type": ctype}) + "\n")
 
     httpx_lines.sort()
     httpx_all_txt.write_text(
@@ -147,6 +187,7 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     )
 
     dir_files_output: list[str] = []
+    listed_data_rows: list[str] = []
     for line in dir_listing_lines:
         parts = line.split()
         if not parts:
@@ -158,7 +199,20 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         matches = re.findall(r'<a\s+href="[^"]*">[^<]*</a>', resp.body, re.IGNORECASE)
         for tag in matches[:50]:
             dir_files_output.append(tag)
-        dir_files_output.append("# contents NOT downloaded")
+        # Peek at the header row of listed data files to tell an information
+        # leak from a personal-data exposure (first few KB only).
+        for href in re.findall(r'<a\s+href="([^"?#]+\.(?:csv|tsv|json|txt|xlsx?|sql|bak|zip))"', resp.body, re.IGNORECASE)[:20]:
+            file_url = urllib.parse.urljoin(url_fetch, href)
+            if not guard.url_allowed(file_url):
+                continue
+            fr = http_get(file_url, timeout=10.0, verify_ssl=False, follow_redirects=False, max_bytes=PROBE_BYTES)
+            data = sniff_root_data(file_url, fr)
+            if data:
+                listed_data_rows.append(
+                    f"{data.url}\t{data.content_type}\t{data.size}\t{','.join(data.columns[:40])}\t{','.join(data.sensitive)}"
+                )
+                dir_files_output.append(f"# {href}: {data.size} bytes, columns: {','.join(data.columns[:15])}")
+        dir_files_output.append("# contents NOT downloaded (header row only)")
 
     (ctx.web_dir / "dir_listings_files.txt").write_text(
         "\n".join(dir_files_output) + ("\n" if dir_files_output else ""), encoding="utf-8"
@@ -167,7 +221,6 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     # Non-intrusive Well-Known Paths & API Surface Check (ctx.web_dir / "exposed_paths.tsv")
     live_base_urls: list[str] = []
     seen_bases: set[str] = set()
-    exclude_set = set(ctx.scope.edge_ips) | set(ctx.scope.exclude_ips)
 
     for line in httpx_lines:
         parts = line.split()
@@ -178,26 +231,29 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         if not m:
             continue
         code = int(m.group(1))
-        if code not in (200, 301, 302, 401, 403):
+        if code == 404:
+            # The ingress catch-all 404 says nothing; an application's own 404
+            # (e.g. FastAPI's JSON) means routes exist that are worth checking.
+            _, ct, title, server = url_meta.get(u, (404, "", "", ""))
+            if is_ingress_default_404(404, ct, title, server):
+                continue
+        elif code not in (200, 301, 302, 401, 403):
+            continue
+        if not guard.url_allowed(u):
             continue
         parsed = urllib.parse.urlparse(u)
-        host = parsed.hostname or ""
-        if host in exclude_set or any(ex in host for ex in exclude_set if ex):
-            continue
         scheme = parsed.scheme or "http"
         base = f"{scheme}://{parsed.netloc}".rstrip("/")
         if base and base not in seen_bases:
             seen_bases.add(base)
             live_base_urls.append(base)
-            if len(live_base_urls) >= 40:
-                break
 
     exposed_rows: list[str] = []
     for base_url in live_base_urls:
         for path, category, regex in WELL_KNOWN_PATHS:
             target_url = f"{base_url}{path}"
-            resp = http_get(target_url, timeout=8.0, verify_ssl=False, follow_redirects=False)
-            if resp.status == 200:
+            resp = http_get(target_url, timeout=8.0, verify_ssl=False, follow_redirects=False, max_bytes=65536)
+            if resp.status in (200, 206):
                 m = re.search(regex, resp.body, re.MULTILINE)
                 if m:
                     snippet = m.group(0).strip().replace("\t", " ").replace("\r", " ").replace("\n", " ")[:120]
@@ -206,6 +262,33 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
     (ctx.web_dir / "exposed_paths.tsv").write_text(
         "\n".join(exposed_rows) + ("\n" if exposed_rows else ""), encoding="utf-8"
+    )
+
+    # Data files served at the web root (CSV/JSON/downloads) and API endpoints
+    # published through OpenAPI. Only a few KB are read: enough to see the
+    # columns, never the dataset.
+    root_rows: list[str] = list(listed_data_rows)
+    api_rows: list[str] = []
+    for base_url in live_base_urls:
+        status0, ct0, title0, _ = url_meta.get(base_url, url_meta.get(base_url + "/", (0, "", "", "")))
+        if status0 in (200, 206) and "html" not in ct0.lower():
+            r = http_get(f"{base_url}/", timeout=10.0, verify_ssl=False, follow_redirects=False, max_bytes=PROBE_BYTES)
+            data = sniff_root_data(f"{base_url}/", r)
+            if data:
+                root_rows.append(
+                    f"{data.url}\t{data.content_type}\t{data.size}\t{','.join(data.columns[:40])}\t{','.join(data.sensitive)}"
+                )
+        schema_url, endpoints = discover_api(base_url, http_get)
+        for ep in endpoints:
+            api_rows.append(
+                f"{ep.url}\t{ep.status}\t{ep.content_type}\t{ep.size}\t{','.join(ep.sensitive)}\t{schema_url}"
+            )
+        time.sleep(0.05)
+    (ctx.web_dir / "root_data.tsv").write_text(
+        "\n".join(root_rows) + ("\n" if root_rows else ""), encoding="utf-8"
+    )
+    (ctx.web_dir / "api_endpoints.tsv").write_text(
+        "\n".join(api_rows) + ("\n" if api_rows else ""), encoding="utf-8"
     )
 
     # CORS & Cookie Hygiene (ctx.web_dir / "cors_cookies.tsv")
@@ -259,6 +342,10 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         *(f"  {r}" for r in exposed_rows[:10]),
         f"CORS & Cookie hygiene checks across {len(live_base_urls)} live hosts: {len(cors_cookie_rows)} findings",
         *(f"  {r}" for r in cors_cookie_rows[:10]),
+        f"Data files at web root: {len(root_rows)}",
+        *(f"  {r}" for r in root_rows[:10]),
+        f"API endpoints from published OpenAPI schemas: {len(api_rows)}",
+        *(f"  {r}" for r in api_rows[:10]),
     ]
     record_virtual_cmd(
         console_dir=ctx.console_dir,
@@ -270,7 +357,8 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
     log.ok(
         f"{len(httpx_lines)} live web hosts, {len(dir_listing_lines)} directory listings, "
-        f"{len(exposed_rows)} exposed paths, {len(cors_cookie_rows)} CORS/cookie findings"
+        f"{len(exposed_rows)} exposed paths, {len(cors_cookie_rows)} CORS/cookie findings, "
+        f"{len(root_rows)} root data files, {len(api_rows)} API endpoints"
     )
 
 
@@ -281,28 +369,32 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     if dm.run_dir is None:
         dm.run_dir = ctx.run_dir
 
-    raw_ips: list[str] = list(ctx.scope.hvt_ips)
+    # hvt_ips are declared explicitly in scope; discovered IPs come from public DNS
+    # and must be globally routable (never RFC1918, CGNAT, link-local/metadata).
+    raw_ips: list[tuple[str, bool]] = [(ip, True) for ip in ctx.scope.hvt_ips]
     if ctx.scope.auto_discover_targets:
         disc_file = ctx.osint_dir / "discovered_targets.txt"
         if disc_file.is_file():
             for line in disc_file.read_text(encoding="utf-8", errors="replace").splitlines():
                 ip_str = line.strip()
                 if ip_str and not ip_str.startswith("#"):
-                    raw_ips.append(ip_str)
+                    raw_ips.append((ip_str, False))
 
-    exclude_ips = set(ctx.scope.exclude_ips) | set(ctx.scope.edge_ips)
+    blocked = parse_networks(list(ctx.scope.exclude_ips) + list(ctx.scope.edge_ips))
+    owned_guard = guard_for(ctx)
     target_ips: list[str] = []
     seen_ips: set[str] = set()
-    for ip in raw_ips:
-        if (
-            ip not in seen_ips
-            and ip not in exclude_ips
-            and not ip.startswith("127.")
-            and ip != "::1"
-            and ip != "0.0.0.0"
-        ):
-            seen_ips.add(ip)
-            target_ips.append(ip)
+    for ip, declared in raw_ips:
+        if ip in seen_ips or ip_in(ip, blocked):
+            continue
+        if not declared and not is_public_ip(ip):
+            log.warn(f"Phase 4: skipping non-public discovered IP {ip}")
+            continue
+        if not declared and not owned_guard.is_owned(ip):
+            log.warn(f"Phase 4: skipping {ip} - outside owned_ranges")
+            continue
+        seen_ips.add(ip)
+        target_ips.append(ip)
 
     if not dm.is_available("nmap"):
         log.warn("nmap not available - phase 4 skipped")
@@ -516,6 +608,7 @@ def phase5(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
     httpx_txt = ctx.web_dir / "httpx_all.txt"
     whatweb_targets = ctx.web_dir / "whatweb_targets.txt"
+    guard = guard_for(ctx)
     urls: list[str] = []
     seen_urls: set[str] = set()
     if httpx_txt.is_file():
@@ -524,7 +617,7 @@ def phase5(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 parts = line.split()
                 if parts:
                     u = parts[0]
-                    if u not in seen_urls:
+                    if u not in seen_urls and guard.url_allowed(u):
                         seen_urls.add(u)
                         urls.append(u)
 
@@ -583,11 +676,19 @@ def phase8(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 if code in (200, 301, 302, 307, 308, 401, 403):
                     targets.append(url_str)
 
-    forbidden_ips = set(ctx.scope.edge_ips) | set(ctx.scope.exclude_ips)
+    guard = guard_for(ctx)
+    blocked = parse_networks(list(ctx.scope.exclude_ips) + list(ctx.scope.edge_ips))
+    hvt_set = set(ctx.scope.hvt_ips)
     filtered_targets: list[str] = []
     seen: set[str] = set()
     for t in targets:
-        if any(bad_ip in t for bad_ip in forbidden_ips if bad_ip):
+        host = urllib.parse.urlparse(t if "://" in t else f"https://{t}").hostname or ""
+        if host in hvt_set:
+            if ip_in(host, blocked):
+                continue
+        elif not guard.url_allowed(t, require_owned=True):
+            # nuclei only runs against infrastructure we own; CDN/SaaS-hosted
+            # names still get the light httpx/well-known checks in phase 3.
             continue
         if t not in seen:
             seen.add(t)

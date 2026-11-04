@@ -14,6 +14,7 @@ from typing import Any, List, Set, Tuple
 from recon.config import RunContext
 from recon.deps import DependencyManager
 from recon.runner import Logger, ev, record_virtual_cmd, run_cmd
+from recon.scope import ip_in, is_public_ip, parse_networks
 
 __all__ = [
     "phaseA",
@@ -1066,11 +1067,11 @@ def _scan_cloud_ips(
 
     n = len(raw_ips)
 
-    exclude_set: set[str] = set(ctx.scope.exclude_ips) | set(ctx.scope.edge_ips)
+    blocked = parse_networks(list(ctx.scope.exclude_ips) + list(ctx.scope.edge_ips))
     target_ips: list[str] = []
     seen_targets: set[str] = set()
     for ip in raw_ips:
-        if ip not in exclude_set and ip not in seen_targets:
+        if is_public_ip(ip) and not ip_in(ip, blocked) and ip not in seen_targets:
             seen_targets.add(ip)
             target_ips.append(ip)
 
@@ -1272,9 +1273,9 @@ def phaseA(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
             "| where r.properties.direction == 'Inbound' and r.properties.access == 'Allow' "
             "| extend src = tostring(r.properties.sourceAddressPrefix) "
             "| where src in ('*', 'Internet', '0.0.0.0/0', 'Any') "
-            "| project nsg=name, resourceGroup, rule=tostring(r.name), "
-            "ports=strcat(tostring(r.properties.destinationPortRange), tostring(r.properties.destinationPortRanges)), "
-            "attachedNics=array_length(properties.networkInterfaces)"
+            "| project nsg=name, resourceGroup, rule=tostring(r.name), id, "
+            "port=tostring(r.properties.destinationPortRange), portRanges=r.properties.destinationPortRanges, "
+            "nics=properties.networkInterfaces"
         )
         cmd_nsg = dm.build_cmd(
             "az",
@@ -1306,11 +1307,13 @@ def phaseA(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 nsg = str(item.get("nsg") or "").strip()
                 rg = str(item.get("resourceGroup") or "").strip()
                 rule = str(item.get("rule") or "").strip()
-                ports = str(item.get("ports") or "").strip()
-                attached_nics = item.get("attachedNics")
-                if attached_nics is None:
-                    attached_nics = 0
-                f.write(f"{nsg}\t{rg}\t{rule}\t{ports}\t{attached_nics}\n")
+                # A rule has either destinationPortRange or a destinationPortRanges list.
+                ranges = item.get("portRanges") or []
+                ports = str(item.get("port") or "").strip() or ",".join(str(r) for r in ranges if r)
+                nics = [str(n.get("id", "")).rstrip("/").split("/")[-1]
+                        for n in (item.get("nics") or []) if isinstance(n, dict)]
+                nsg_id = str(item.get("id") or "").strip()
+                f.write(f"{nsg}\t{rg}\t{rule}\t{ports}\t{len(nics)}\t{','.join(nics)}\t{nsg_id}\n")
     else:
         log.warn("az CLI missing and no azure_inventory_file - Annex A skipped")
         return

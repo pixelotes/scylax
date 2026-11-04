@@ -14,7 +14,7 @@ from recon.config import ACTIVE_PHASES, DEFAULT_PHASES, RunContext, ScopeConfig
 from recon.deps import DependencyManager
 from recon.phases import PHASE_MAP, active, cloud, osint, saas, triage
 from recon.report import generate_reports
-from recon.runner import Logger, have, http_get
+from recon.runner import Logger, have, http_get, reset_phase_console
 from recon.venv_manager import ensure_venv
 
 
@@ -194,18 +194,15 @@ def preflight(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     log.info(f"Scope: {ctx.scope.path}  Run folder: {ctx.run_dir}  (previous: {ctx.prev_run_dir or 'none'})")
 
     # Determine active phases that will actually run
-    effective_phases = [
-        p for p in ctx.phases
-        if not (ctx.skip_active and p in ACTIVE_PHASES)
-        and not ((ctx.skip_cloud or ctx.skip_azure) and p in ("A", "G", "W"))
-    ]
+    effective_phases = [p for p in ctx.phases if not ctx.phase_skip_reason(p)]
 
     statuses = dm.check_all(effective_phases)
     ok_req = dm.print_report(statuses)
 
     for st in statuses:
         if not st.available and not st.is_required_for_active and st.needed_for_phases:
-            log.warn(f"{st.plugin.name} not available ({st.plugin.install_macos}) - phase {'/'.join(st.plugin.phases)} degraded")
+            used_by = [p for p in st.plugin.phases if p in effective_phases]
+            log.warn(f"{st.plugin.name} not available ({st.plugin.install_macos}) - phase {'/'.join(used_by)} degraded")
 
     if not ok_req:
         log.error("Missing required dependencies for requested phases. Install them or try --docker.")
@@ -251,13 +248,21 @@ def preflight(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
     # Write run.meta and tool_versions.txt
     egress_ip = _get_egress_ip()
+    # Re-running some phases in an existing run dir keeps the record of the
+    # phases that already produced evidence there (the diff relies on it).
+    run_phases = list(ctx.phases)
+    old_meta = ctx.run_dir / "run.meta"
+    if old_meta.is_file():
+        for line in old_meta.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith("phases="):
+                run_phases = list(dict.fromkeys(line[len("phases="):].split() + run_phases))
     meta_content = (
         f"engagement={ctx.scope.engagement}\n"
         f"scope={ctx.scope.path}\n"
         f"date={ctx.run_date}\n"
         f"authorised_by={ctx.scope.authorised_by}\n"
         f"authorisation_ref={ctx.scope.authorisation_ref}\n"
-        f"phases={' '.join(ctx.phases)}\n"
+        f"phases={' '.join(run_phases)}\n"
         f"skip_active={'1' if ctx.skip_active else '0'}\n"
         f"use_docker={'1' if ctx.use_docker else '0'}\n"
         f"egress_ip={egress_ip}\n"
@@ -319,6 +324,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         scope.authorisation_ref = os.environ.get("AUTHORISATION_REF", "").strip()
 
     phases = [p.strip() for p in re.split(r"[\s,]+", args.phases) if p.strip()]
+    # Cloud annexes named explicitly (-p or $PHASES) run even without provider config.
+    explicit_phases = args.phases != " ".join(DEFAULT_PHASES)
 
     ctx = RunContext(
         root=Path.cwd(),
@@ -336,6 +343,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         use_prowler=bool(args.use_prowler or scope.use_prowler),
         saas_posture=bool(args.saas_posture or scope.saas_posture),
         quick_scan=bool(args.quick or scope.quick_scan),
+        explicit_phases=explicit_phases,
         top_ports=(
             args.top_ports if args.top_ports is not None
             else scope.top_ports if scope.top_ports is not None
@@ -344,6 +352,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     ctx.ensure_dirs()
     log.gaps_file = ctx.run_dir / "gaps.txt"
+    # gaps.txt describes this run: a re-run that collects evidence starts it afresh
+    # (a triage-only re-run keeps the gaps of the run it reports on).
+    if any(p != "T" for p in ctx.phases) and log.gaps_file.is_file():
+        log.gaps_file.unlink()
 
     dm = DependencyManager(use_docker=ctx.use_docker, run_dir=ctx.run_dir)
     preflight(ctx, dm, log)
@@ -352,16 +364,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     phase_dispatch = PHASE_MAP
 
     for p in ctx.phases:
-        if ctx.skip_active and p in ACTIVE_PHASES:
-            log.info(f"skip phase {p} (skip_active)")
-            continue
-        if (ctx.skip_cloud or ctx.skip_azure) and p in ("A", "G", "W"):
-            log.info(f"skip phase {p} (skip_cloud)")
+        reason = ctx.phase_skip_reason(p)
+        if reason:
+            log.info(f"skip phase {p} ({reason})")
             continue
         fn = phase_dispatch.get(p)
         if fn is None:
             log.warn(f"unknown phase {p}")
             continue
+        reset_phase_console(ctx.console_dir, p)
         fn(ctx, dm, log)
 
     log.ok(f"Done. Evidence: {ctx.run_dir}")

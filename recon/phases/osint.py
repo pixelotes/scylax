@@ -34,6 +34,9 @@ from recon.runner import (
     record_virtual_cmd,
     run_cmd,
 )
+from recon.nvd import cpe_to_23, load_kev_ids, nvd_cves_for_cpe
+from recon.scope import ScopeGuard
+from recon.webprobe import is_hash_label
 
 
 def phase1(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
@@ -42,6 +45,16 @@ def phase1(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     ctx.ensure_dirs()
 
     all_raw_lines: list[str] = []
+    # Certificate Transparency: first certificate date per hostname
+    ct_first_seen: dict[str, str] = {}
+
+    def _ct_note(name: str, not_before: str) -> None:
+        name = name.strip().lower()
+        if name.startswith("*."):
+            name = name[2:]
+        day = str(not_before or "")[:10]
+        if name and day and (name not in ct_first_seen or day < ct_first_seen[name]):
+            ct_first_seen[name] = day
 
     for d in ctx.scope.domains:
         # 1. subfinder
@@ -79,6 +92,7 @@ def phase1(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                     if isinstance(item, dict) and "name_value" in item:
                         nv_raw = str(item["name_value"])
                         for name_line in nv_raw.splitlines():
+                            _ct_note(name_line, item.get("not_before", ""))
                             nl = name_line.strip().lower()
                             if nl.startswith("*."):
                                 nl = nl[2:]
@@ -94,7 +108,18 @@ def phase1(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
             title=f"crt.sh ({d})",
         )
         if status != 200:
-            log.warn(f"crt.sh returned HTTP {status} for {d} (CT coverage relies on subfinder + amass)")
+            # crt.sh is often overloaded: fall back to SSLMate certspotter (keyless, rate limited)
+            cs_names = _certspotter_names(d, _ct_note)
+            all_raw_lines.extend(cs_names)
+            record_virtual_cmd(
+                ctx.console_dir,
+                "1",
+                f"curl -s 'https://api.certspotter.com/v1/issuances?domain={d}&include_subdomains=true&expand=dns_names'",
+                f"{len(cs_names)} names",
+                title=f"certspotter ({d})",
+            )
+            if not cs_names:
+                log.warn(f"crt.sh returned HTTP {status} and certspotter returned nothing for {d} (CT coverage relies on subfinder + amass)")
 
         # Always include d itself
         all_raw_lines.append(d)
@@ -125,6 +150,26 @@ def phase1(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         counts_lines.append(f"{d} {c}\n")
 
     (ctx.osint_dir / "subdomain_counts.txt").write_text("".join(counts_lines), encoding="utf-8")
+    # Wildcard CT queries are truncated on large domains; look up hash-like
+    # hostnames (the "unguessable URL" pattern) one by one so they get a date.
+    missing = [h for h in subdomains if is_hash_label(h) and h not in ct_first_seen][:60]
+    for h in missing:
+        st, data = http_get_json(f"https://crt.sh/?q={urllib.parse.quote(h)}&output=json", timeout=60)
+        if st == 200 and isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict):
+                    for name_line in str(item.get("name_value", "")).splitlines():
+                        _ct_note(name_line, item.get("not_before", ""))
+        time.sleep(1.0)
+    if missing:
+        record_virtual_cmd(
+            ctx.console_dir, "1", f"crt.sh exact lookups for {len(missing)} hash-like hostnames",
+            f"{sum(1 for h in missing if h in ct_first_seen)} dated", title="crt.sh (hash-like hosts)",
+        )
+    (ctx.osint_dir / "ct_first_seen.tsv").write_text(
+        "".join(f"{h}\t{ct_first_seen[h]}\n" for h in sorted(ct_first_seen) if pattern.search(h)),
+        encoding="utf-8",
+    )
     log.ok(f"{len(subdomains)} subdomains")
 
     # Diff against previous run
@@ -146,6 +191,32 @@ def phase1(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 "".join(f"{s}\n" for s in gone_subs), encoding="utf-8"
             )
             log.ok(f"vs {ctx.prev_run_dir.name}: {len(new_subs)} new, {len(gone_subs)} gone")
+
+
+def _certspotter_names(domain: str, note, max_pages: int = 20) -> list[str]:
+    """Hostnames for ``domain`` from SSLMate certspotter, recording first-seen dates."""
+    names: list[str] = []
+    after = ""
+    for _ in range(max_pages):
+        url = (
+            f"https://api.certspotter.com/v1/issuances?domain={urllib.parse.quote(domain)}"
+            f"&include_subdomains=true&expand=dns_names" + (f"&after={after}" if after else "")
+        )
+        st, data = http_get_json(url, timeout=60)
+        if st != 200 or not isinstance(data, list) or not data:
+            break
+        for item in data:
+            for n in item.get("dns_names") or []:
+                n = str(n).strip().lower()
+                if n.startswith("*."):
+                    n = n[2:]
+                if n:
+                    names.append(n)
+                    note(n, item.get("not_before", ""))
+        after = str(data[-1].get("id", ""))
+        if not after:
+            break
+    return names
 
 
 def phase2(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
@@ -335,34 +406,50 @@ def phase2(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     skip_re = None
     if ctx.scope.skip_portscan_orgs_regex and ctx.scope.skip_portscan_orgs_regex != r"^$":
         skip_re = re.compile(ctx.scope.skip_portscan_orgs_regex, re.IGNORECASE)
+    guard = ScopeGuard(
+        list(ctx.scope.exclude_ips) + list(ctx.scope.edge_ips),
+        {},
+        ctx.scope.owned_entries() if ctx.scope.ownership_enforced else None,
+    )
+    skipped_lines: list[str] = []
 
     for ip in sorted(ip_to_hosts.keys()):
         hosts = ip_to_hosts[ip]
         ptr_res = run_cmd(dm.build_cmd("dig", ["+short", "-x", ip]), timeout=10)
         ptr = ptr_res.stdout.splitlines()[0].strip() if ptr_res.stdout.splitlines() else ""
 
-        org = ""
+        # Collect every org/netname/descr line: ARIN lists NetName before OrgName,
+        # so the first match alone misses providers such as Fastly or CloudFront.
+        orgs: list[str] = []
         if dm.is_available("whois"):
             whois_res = run_cmd(dm.build_cmd("whois", [ip]), timeout=15)
             for line in whois_res.combined.splitlines():
-                m = re.match(r"(?i)^(?:org-name|orgname|netname|descr):\s*(.+)$", line.strip())
-                if m:
-                    org = m.group(1).strip()
-                    break
+                m = re.match(r"(?i)^(?:org-name|orgname|org|netname|descr|owner):\s*(.+)$", line.strip())
+                if m and m.group(1).strip() not in orgs:
+                    orgs.append(m.group(1).strip())
+        org = "; ".join(orgs)
 
         hosts_sample = ",".join(hosts[:5])
         ip_orgs_lines.append(f"{ip}\t{org}\t{ptr}\t{hosts_sample}\n")
 
         if ctx.scope.auto_discover_targets:
-            if ip in ctx.scope.edge_ips or ip in ctx.scope.exclude_ips:
+            reason = ""
+            if not guard.ip_allowed(ip):
+                reason = "excluded/edge/non-public"
+            elif skip_re is not None and (
+                any(skip_re.search(o) for o in orgs) or (ptr and skip_re.search(ptr))
+            ):
+                reason = "cdn/saas org"
+            elif not guard.is_owned(ip):
+                reason = "not in owned_ranges (third-party hosting)"
+            if reason:
+                skipped_lines.append(f"{ip}\t{reason}\t{org}\t{ptr}\t{hosts_sample}\n")
                 continue
-            if skip_re is not None:
-                if (org and skip_re.search(org)) or (ptr and skip_re.search(ptr)):
-                    continue
             discovered_targets.append(ip)
 
     discovered_targets = sorted(set(discovered_targets))
     (ctx.osint_dir / "ip_orgs.tsv").write_text("".join(ip_orgs_lines), encoding="utf-8")
+    (ctx.osint_dir / "skipped_targets.tsv").write_text("".join(skipped_lines), encoding="utf-8")
     (ctx.osint_dir / "discovered_targets.txt").write_text(
         "".join(f"{ip}\n" for ip in discovered_targets), encoding="utf-8"
     )
@@ -446,6 +533,11 @@ def phase6(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
     entry_points: list[tuple[str, str, str]] = []
     seen: set[tuple[str, str]] = set()
+    # Static assets carry cache-busters (?id=, ?v=) that are not entry points
+    static_re = re.compile(
+        r"\.(css|js|mjs|map|png|jpe?g|gif|svg|ico|webp|avif|woff2?|ttf|eot|otf|mp4|webm|mp3)$",
+        re.IGNORECASE,
+    )
 
     for u in unique_urls:
         if len(entry_points) >= 200:
@@ -453,6 +545,8 @@ def phase6(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         try:
             parsed = urllib.parse.urlsplit(u)
         except Exception:
+            continue
+        if static_re.search(parsed.path):
             continue
 
         base_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
@@ -661,6 +755,8 @@ def phase7(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     # Cache for CVEDB queries
     cpe_cache: dict[str, list[dict[str, Any]]] = {}
     cve_cache: dict[str, dict[str, Any]] = {}
+    # CVEDB (*.shodan.io) is often blocked by egress firewalls; fall back to NVD.
+    cve_source = {"name": "cvedb", "down": False}
 
     def fetch_cve(cve_id: str) -> dict[str, Any]:
         if cve_id in cve_cache:
@@ -681,6 +777,9 @@ def phase7(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         return res_info
 
     def fetch_cpe_cves(cpe: str) -> list[dict[str, Any]]:
+        cpe_full = cpe_to_23(cpe)
+        if cpe_full is None:
+            return []
         cpe_clean = cpe.strip()
         if cpe_clean.startswith("cpe:/"):
             parts = cpe_clean[len("cpe:/") :].split(":")
@@ -694,9 +793,20 @@ def phase7(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         if cpe23 in cpe_cache:
             return cpe_cache[cpe23]
 
-        url = f"https://cvedb.shodan.io/cves?cpe23={urllib.parse.quote(cpe23)}"
-        st, data = http_get_json(url, timeout=15)
         items: list[dict[str, Any]] = []
+        st, data = 0, None
+        if not cve_source["down"]:
+            url = f"https://cvedb.shodan.io/cves?cpe23={urllib.parse.quote(cpe23)}"
+            st, data = http_get_json(url, timeout=15)
+            if st == 0 or st == 403 or st >= 500:
+                cve_source.update(name="nvd", down=True)
+                log.warn("Shodan CVEDB unreachable - falling back to NVD API (set NVD_API_KEY to speed it up)")
+        if cve_source["down"]:
+            nvd_st, items = nvd_cves_for_cpe(cpe_full)
+            if nvd_st != 200:
+                log.warn(f"NVD lookup failed for {cpe_full} (HTTP {nvd_st})")
+            cpe_cache[cpe23] = items
+            return items
         if st == 200 and data is not None:
             raw_cves = (
                 data.get("cves")
@@ -828,6 +938,14 @@ def phase7(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                             }
                         )
 
+    kev_ids = load_kev_ids()
+    if kev_ids:
+        for f in findings:
+            if f["cve"] in kev_ids:
+                f["is_kev"] = True
+    else:
+        log.warn("CISA KEV catalogue unreachable - KEV flags rely on CVEDB data only")
+
     # Deduplicate findings by (ip, port, cve)
     seen_f: set[tuple[str, str, str]] = set()
     unique_findings: list[dict[str, Any]] = []
@@ -905,7 +1023,7 @@ def phase7(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     record_virtual_cmd(
         ctx.console_dir,
         "7",
-        "cvedb-lookup --from-nmap-xml --shodan",
+        f"cve-lookup --from-nmap-xml --source {cve_source['name']} --kev cisa",
         summary_text.strip(),
         title="CVE & CISA KEV Correlation",
     )
@@ -1073,6 +1191,32 @@ def _hibp_breach_details(name: str) -> dict[str, Any] | None:
     return details
 
 
+BREACH_RETRY_WAIT = 30.0
+BREACH_RETRIES = 2
+
+
+def _breach_lookup(
+    log: Logger,
+    service: str,
+    em: str,
+    url: str,
+    headers: dict[str, str],
+) -> tuple[int, Any]:
+    """GET a per-account breach API, retrying failures (rate limit, 5xx, timeout).
+
+    200 and 404 are answers ("breached" / "not breached"); anything else is
+    retried after BREACH_RETRY_WAIT seconds, up to BREACH_RETRIES times.
+    """
+    status, data = http_get_json(url, headers=headers, timeout=20.0)
+    for attempt in range(1, BREACH_RETRIES + 1):
+        if status in (200, 404):
+            break
+        log.info(f"{service} lookup for {em} returned HTTP {status}; retry {attempt}/{BREACH_RETRIES} in {BREACH_RETRY_WAIT:.0f}s")
+        time.sleep(BREACH_RETRY_WAIT)
+        status, data = http_get_json(url, headers=headers, timeout=20.0)
+    return status, data
+
+
 def _xposedornot_account_breaches(
     ctx: RunContext,
     log: Logger,
@@ -1087,7 +1231,7 @@ def _xposedornot_account_breaches(
     for em in emails:
         time.sleep(1.1)
         url = f"https://api.xposedornot.com/v1/check-email/{urllib.parse.quote(em)}"
-        status, data = http_get_json(url, headers={"User-Agent": "Scylax/1.0"}, timeout=20.0)
+        status, data = _breach_lookup(log, "XposedOrNot", em, url, {"User-Agent": "Scylax/1.0"})
         display_cmd = f"curl -s '{url}'"
         if status == 404:
             record_virtual_cmd(
@@ -1097,7 +1241,7 @@ def _xposedornot_account_breaches(
             )
             continue
         if status != 200 or not isinstance(data, dict):
-            log.warn(f"XposedOrNot lookup for {em} returned HTTP {status}")
+            log.warn(f"XposedOrNot lookup for {em} returned HTTP {status} after {BREACH_RETRIES} retries")
             record_virtual_cmd(
                 ctx.console_dir, "9", display_cmd, f"HTTP {status}",
                 title=f"XposedOrNot account breaches ({em})", returncode=1,
@@ -1229,7 +1373,7 @@ def run_hibp_breaches(
         for em in target_emails[:50]:
             time.sleep(1.6)  # HIBP enforces 1 request per 1.5s rate limit
             url = f"https://haveibeenpwned.com/api/v3/breachedaccount/{urllib.parse.quote(em)}?truncateResponse=false"
-            status, data = http_get_json(url, headers=headers, timeout=20.0)
+            status, data = _breach_lookup(log, "HIBP", em, url, headers)
             display_cmd = f"curl -s{key_hdr} '{url}'"
 
             if status == 200 and isinstance(data, list):
@@ -1271,7 +1415,7 @@ def run_hibp_breaches(
                     title=f"HIBP account breaches ({em})",
                 )
             else:
-                log.warn(f"HIBP account lookup for {em} returned HTTP {status}")
+                log.warn(f"HIBP account lookup for {em} returned HTTP {status} after {BREACH_RETRIES} retries")
                 record_virtual_cmd(
                     ctx.console_dir,
                     "9",
@@ -1332,8 +1476,6 @@ Public GitHub code search (after gh auth login):
                 )
         else:
             log.warn("gh not authenticated - public code-leak search not run")
-    else:
-        log.warn("gh not authenticated - public code-leak search not run")
 
     # 1. Enumerate corporate emails via theHarvester, amass, spiderfoot, and passive sources
     emails = run_email_enumeration(ctx, dm, log)
