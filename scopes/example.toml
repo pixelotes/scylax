@@ -191,12 +191,22 @@ providers = ["m365", "github", "google"]
 # CLI & auth: Google Apps Manager (`gam` CLI or GAM_PATH env var) authenticated as super admin:
 #   gam info domain
 
+[saas_exposure]
+# Phase E (opt-in): anonymous, read-only checks of third-party SaaS tenants named after the organisation
+# (Atlassian Cloud: <name>.atlassian.net). Fixed endpoints only; names default to the first label of each public domain.
+enabled = false
+org_names = []                # extra tenant names to try, e.g. ["contoso-corp"]
+
 [limits]
 # Scan rate limits (keep conservative on production networks).
 nmap_max_rate = 400           # packets/sec for HVT and cloud scans
 edge_max_rate = 40            # packets/sec for fragile edge fingerprinting
 nuclei_rate = 50              # requests/sec
 httpx_rate = 50               # requests/sec
+
+# Phase 4 service scans also enumerate TLS protocols/ciphers (nmap ssl-enum-ciphers) for the TLS posture
+# candidates. Set to false to skip it (faster, fewer handshakes).
+tls_enum_ciphers = true
 
 # Amass enumeration settings.
 use_amass = true

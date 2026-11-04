@@ -12,6 +12,9 @@ from pathlib import Path
 from recon.config import RunContext
 from recon.deps import DependencyManager
 from recon.runner import Logger, ev, http_get, infra_failure, record_tool_failure, record_virtual_cmd, run_cmd
+from recon import tlsposture, wellknown
+from recon.phases.osint import NON_PUBLIC_TLDS
+from recon.resilience import AdaptiveLimiter
 from recon.scope import guard_for, ip_in, is_public_ip, parse_networks
 from recon.sensitive_paths import SENSITIVE_PATHS, probe_sensitive_paths
 from recon.webprobe import PROBE_BYTES, discover_api, is_ingress_default_404, sniff_root_data
@@ -361,6 +364,52 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         f"{len(exposed_rows)} exposed paths, {len(cors_cookie_rows)} CORS/cookie findings, "
         f"{len(root_rows)} root data files, {len(api_rows)} API endpoints"
     )
+    _wellknown_pivots(ctx, [u for u, (st, *_rest) in url_meta.items() if st in (200, 401, 403)], log)
+
+
+def _wellknown_pivots(ctx: RunContext, live_urls: list[str], log: Logger) -> None:
+    """security.txt and OpenID discovery: findings plus hostnames missing from enumeration."""
+    known: set[str] = set()
+    subs = ctx.osint_dir / "subdomains.txt"
+    if subs.is_file():
+        known = {l.strip().lower() for l in subs.read_text(encoding="utf-8", errors="replace").splitlines() if l.strip()}
+    domains = [d for d in ctx.scope.domains if d.rsplit(".", 1)[-1].lower() not in NON_PUBLIC_TLDS]
+    findings, pivots = wellknown.run(domains, live_urls, known, AdaptiveLimiter().wrap(http_get), ctx.today)
+    (ctx.web_dir / "wellknown_findings.tsv").write_text(
+        "".join("\t".join(c.replace("\t", " ").replace("\n", " ") for c in r) + "\n" for r in findings), encoding="utf-8"
+    )
+    (ctx.web_dir / "wellknown_hosts.tsv").write_text(
+        "source\tpath\thostname\tin_scope\tknown_subdomain\n" + "".join("\t".join(r) + "\n" for r in pivots), encoding="utf-8"
+    )
+    new = sum(1 for r in pivots if r[4] == "no")
+    log.info(f"Phase 3: well-known files: {len(findings)} candidate(s), {new} hostname(s) not in subdomain enumeration")
+
+
+def _collect_tls(ctx: RunContext, target_ips: list[str], log: Logger) -> None:
+    """TLS posture findings and certificate hostname pivots from the service-scan XML."""
+    services = []
+    for ip in target_ips:
+        services.extend(tlsposture.parse_nmap_tls(ctx.scan_dir / f"svc_{ip}.xml"))
+    rows = tlsposture.tls_findings(services, ctx.today)
+    (ctx.scan_dir / "tls_findings.tsv").write_text(
+        "".join("\t".join(c.replace("\t", " ").replace("\n", " ") for c in r) + "\n" for r in rows), encoding="utf-8"
+    )
+
+    known: set[str] = set()
+    subs = ctx.osint_dir / "subdomains.txt"
+    if subs.is_file():
+        known = {l.strip().lower() for l in subs.read_text(encoding="utf-8", errors="replace").splitlines() if l.strip()}
+    pivot_lines = ["ip\tport\thostname\tin_scope\tknown_subdomain\n"]
+    new_in_scope = 0
+    for ip, port, name in tlsposture.cert_names(services):
+        scoped = tlsposture.in_scope(name, ctx.scope.domains)
+        is_known = name in known
+        new_in_scope += scoped and not is_known
+        pivot_lines.append(f"{ip}\t{port}\t{name}\t{'yes' if scoped else 'no'}\t{'yes' if is_known else 'no'}\n")
+    (ctx.scan_dir / "cert_pivots.tsv").write_text("".join(pivot_lines), encoding="utf-8")
+    if services:
+        log.info(f"Phase 4: TLS posture on {len(services)} service(s): {len(rows)} candidate(s), "
+                 f"{new_in_scope} in-scope certificate hostname(s) missing from subdomain enumeration")
 
 
 def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
@@ -416,6 +465,7 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         scan_desc = "all 65535 ports"
         scan_title_suffix = "full"
 
+    tls_enum = bool(getattr(ctx.scope, "tls_enum_ciphers", True))
     log.info(f"Phase 4: Scanning {total} targets ({scan_desc}, rate: {ctx.scope.nmap_max_rate} pkts/s, max-retries: 1, host-timeout: 5m)")
 
     for idx, ip in enumerate(target_ips, 1):
@@ -484,19 +534,22 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                         "--max-rate",
                         str(ctx.scope.nmap_max_rate),
                         "--host-timeout",
-                        "5m",
+                        "8m" if tls_enum else "5m",
                         "-sV",
                         "--script",
-                        "banner,ssl-cert,ssh2-enum-algos,http-title,http-headers,http-server-header",
+                        "banner,ssl-cert,ssh2-enum-algos,http-title,http-headers,http-server-header"
+                        + (",ssl-enum-ciphers" if tls_enum else ""),
                         "-oA",
                         str(svc_prefix),
                         ip,
                     ],
                 ),
-                timeout=360,
+                timeout=540 if tls_enum else 360,
                 title=f"nmap service scan ({ip})",
             )
             log.ok(f"[{idx}/{total}] {ip}: {ports_csv}")
+
+    _collect_tls(ctx, target_ips, log)
 
     # nmap -sU needs raw sockets: root on the host, or nmap running in a
     # container (which runs as root with CAP_NET_RAW by default).
@@ -756,7 +809,7 @@ def _sensitive_path_fallback(ctx: RunContext, log: Logger, targets: list[str]) -
         for t in targets if urllib.parse.urlparse(t).netloc
     })
     log.info(f"Sensitive-path probe: {len(SENSITIVE_PATHS)} curated paths on {len(bases)} owned base URL(s)")
-    hits = probe_sensitive_paths(bases, http_get)
+    hits = probe_sensitive_paths(bases, AdaptiveLimiter().wrap(http_get))
     rows = [f"{h.url}\t{h.category}\t{h.severity}\t{h.title}\t{h.snippet}" for h in hits]
     (ctx.web_dir / "sensitive_paths.tsv").write_text("".join(f"{r}\n" for r in rows), encoding="utf-8")
     record_virtual_cmd(

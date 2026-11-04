@@ -12,7 +12,7 @@ from recon.config import RunContext
 from recon.deps import DependencyManager
 from recon.report import generate_reports, nsg_ports
 from recon.webprobe import is_hash_label, is_ingress_default_404
-from recon import notify
+from recon import export, notify
 from recon.runner import (
     Logger,
     http_get,
@@ -828,6 +828,41 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                     add(sev, key, title, detail)
 
     # ------------------------------------------------------------------
+    # 8d. Candidates written by the light collectors (TLS posture, well-known
+    #     files, third-party SaaS exposure): severity, key, service, resource,
+    #     title, detail[, target] - the same shape as the posture TSVs.
+    # ------------------------------------------------------------------
+    for collector_tsv in (
+        ctx.scan_dir / "tls_findings.tsv",
+        ctx.web_dir / "wellknown_findings.tsv",
+        ctx.saas_dir / "exposure_findings.tsv",
+    ):
+        if not collector_tsv.is_file():
+            continue
+        for line in collector_tsv.read_text(encoding="utf-8", errors="replace").splitlines():
+            parts = line.rstrip("\n").split("\t")
+            if line.startswith("#") or len(parts) < 5:
+                continue
+            sev, key, title = parts[0].strip(), parts[1].strip(), parts[4].strip()
+            detail = parts[5].strip() if len(parts) >= 6 else ""
+            target = parts[6].strip() if len(parts) >= 7 else ""
+            if sev and key and title:
+                add(sev, key, title, detail, target)
+
+    # Hostnames seen in certificates / well-known files that subdomain enumeration missed
+    for pivots_tsv, prefix, how in (
+        (ctx.scan_dir / "cert_pivots.tsv", "cert-pivot:", "certificate of"),
+        (ctx.web_dir / "wellknown_hosts.tsv", "wellknown-pivot:", "well-known file of"),
+    ):
+        if not pivots_tsv.is_file():
+            continue
+        for line in pivots_tsv.read_text(encoding="utf-8", errors="replace").splitlines()[1:]:
+            parts = line.split("\t")
+            if len(parts) >= 5 and parts[3] == "yes" and parts[4] == "no":
+                add("info", f"{prefix}{parts[2]}", "In-scope hostname missing from subdomain enumeration",
+                    f"{parts[2]} listed in the {how} {parts[0]}:{parts[1]}", target=parts[2])
+
+    # ------------------------------------------------------------------
     # 9. Nuclei, Wayback Critical & Website Security Headers
     # ------------------------------------------------------------------
     nuclei_file = ctx.web_dir / "nuclei.jsonl"
@@ -979,6 +1014,11 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
     tsv_lines = [f"{sev}\t{key}\t{title}\t{ev}\t{target_of(key)}\n" for sev, key, title, ev in deduped]
     (ctx.run_dir / "findings_auto.tsv").write_text("".join(tsv_lines), encoding="utf-8")
+    export.write_findings_jsonl(
+        ctx.run_dir, deduped, engagement=ctx.scope.engagement, run_date=ctx.run_date,
+        target_of=target_of, phase_of=finding_phase, tools_of=finding_tools,
+    )
+    export.write_assets_jsonl(ctx.run_dir)
 
     # Write findings_auto.md
     md_lines: list[str] = [
@@ -1122,6 +1162,9 @@ _PHASE_BY_PREFIX: tuple[tuple[str, str], ...] = (
     ("takeover:", "2"),
     ("secret-leak:", "9"),
     ("content-disc:", "C"), ("traversal:", "C"),
+    ("tls-", "4"), ("cert-pivot:", "4"),
+    ("wellknown:", "3"), ("wellknown-pivot:", "3"),
+    ("saas-exposure:", "E"),
 )
 
 
@@ -1136,6 +1179,7 @@ _TOOLS_BY_PREFIX: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("mgmt:", ("nmap",)), ("ssh:", ("nmap",)), ("ssh-weak:", ("nmap",)), ("apache:", ("nmap",)),
     ("nginx:", ("nmap",)), ("routeros:", ("nmap",)), ("fakecert:", ("nmap",)), ("fw-admin:", ("nmap",)),
     ("cert-expired:", ("nmap",)), ("cve-", ("nmap",)),
+    ("tls-", ("nmap",)), ("cert-pivot:", ("nmap",)),
 )
 
 
