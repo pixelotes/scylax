@@ -13,6 +13,7 @@ from typing import Sequence
 from recon.config import ACTIVE_PHASES, DEFAULT_PHASES, RunContext, ScopeConfig, validate_scope
 from recon.deps import DependencyManager
 from recon.phases import PHASE_MAP, active, cloud, osint, saas, triage
+from recon.ai_bundle import report_from_bundle
 from recon.report import generate_reports
 from recon.runner import TOOL_FAILURES_FILE, Logger, have, http_get, load_tool_failures, reset_phase_console
 from recon.venv_manager import ensure_venv
@@ -186,6 +187,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="regenerate report.md and report.html for an existing run directory and exit",
     )
     parser.add_argument(
+        "--report-from-bundle",
+        metavar="FILE",
+        help="rebuild report.md and report.html from an ai_bundle.md and exit",
+    )
+    parser.add_argument(
         "--no-venv",
         action="store_true",
         default=(os.environ.get("NO_VENV") == "1"),
@@ -322,6 +328,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
         md_path, html_path = generate_reports(report_dir)
         log.ok(f"Reports generated: {md_path} and {html_path}")
+        return 0
+
+    # 2b. Rebuild a report from an AI bundle
+    if args.report_from_bundle:
+        bundle = Path(args.report_from_bundle)
+        if not bundle.is_file():
+            log.error(f"Bundle file not found: {bundle}")
+            return 1
+        try:
+            md_path, html_path = report_from_bundle(bundle)
+        except Exception as exc:
+            log.error(f"Could not rebuild report from bundle: {exc}")
+            return 1
+        log.ok(f"Reports rebuilt from bundle: {md_path} and {html_path}")
         return 0
 
     print(BANNER)

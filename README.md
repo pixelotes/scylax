@@ -338,7 +338,7 @@ Key settings in `scopes/example.toml`:
 ## Running it
 
 ```text
-./scylax.py -s SCOPE_FILE [-p "PHASES"] [-d DATE] [-P] [-q | -qq] [-n] [-y] [-D] [--no-venv] [--cloud-posture] [--saas-posture] [--prowler] [--check-deps] [--check-config] [--report-only DIR]
+./scylax.py -s SCOPE_FILE [-p "PHASES"] [-d DATE] [-P] [-q | -qq] [-n] [-y] [-D] [--no-venv] [--cloud-posture] [--saas-posture] [--prowler] [--check-deps] [--check-config] [--report-only DIR] [--report-from-bundle FILE]
 ```
 
 | Option | Meaning |
@@ -363,6 +363,7 @@ Key settings in `scopes/example.toml`:
 | `--check-deps` | Print dependency status table and exit |
 | `--check-config` | Validate the scope file (unknown keys, missing files, empty sections) and exit |
 | `--report-only DIR` | Regenerate `report.md` and `report.html` for an existing run folder |
+| `--report-from-bundle FILE` | Rebuild `report.md` and `report.html` from an `ai_bundle.md` alone |
 
 ### Typical workflow
 
@@ -420,17 +421,23 @@ runs/<scope>/
 runs/<scope>/<date>/
   report.html              Interactive dark-mode HTML dashboard (6 tabs + CLI terminal explorer)
   report.md                Comprehensive Markdown report with collapsible CLI evidence
+  ai_bundle.md             Compact, self-contained companion for LLM analysis: run metadata,
+                           coverage gaps and every structured source file embedded (path-tagged);
+                           console logs and huge dumps are left out to fit a model's context window.
+                           Rebuild the reports from it with --report-from-bundle.
   findings_auto.md / .tsv  Prioritised finding candidates
   diff.md                  New / Reappeared / Resolved / Not re-checked / Persisting findings vs previous run
                            (a finding only counts as resolved if its phase ran in both runs)
   run.meta                 Scope, date, authorisation, phases, Docker mode, egress IP
   tool_versions.txt        Detected tool versions / Docker images
   gaps.txt                 Missing optional tools, skipped checks, or API timeouts
+  tool_failures.tsv        Tools that could not run (Docker down, missing binary, timeout); their
+                           findings are marked "not re-checked" in the diff, never "resolved"
   console/
     commands.jsonl         Structured log of every command, exit code, duration, and output
     <phase>.log            Plain-text "$ command + output" captures per phase
-  osint/                   Subdomains (+ new_subdomains.txt), ct_first_seen.tsv (first certificate per host; certspotter fallback), skipped_targets.tsv, DNS posture, WHOIS, apex, IP orgs, discovered targets, Wayback, entry points, Shodan, hibp_breaches.tsv, service_cves.tsv
-  web/                     httpx results, exposed API/config paths, CORS/cookies, directory listings (+ header row of listed data files), tech, nuclei,
+  osint/                   Subdomains (+ new_subdomains.txt), ct_first_seen.tsv (first certificate per host; certspotter fallback), skipped_targets.tsv, DNS posture, WHOIS, apex, IP orgs, discovered targets, Wayback, entry points, Shodan, hibp_breaches.tsv, service_cves.tsv, takeover_candidates.tsv (dangling-CNAME takeover checks), secret_leaks.tsv (secrets in public repos)
+  web/                     httpx results, exposed API/config paths, CORS/cookies, directory listings (+ header row of listed data files), tech, nuclei, sensitive_paths.tsv (native curated-path probe, nuclei fallback),
                            root_data.tsv (data files served at a web root: type, size, columns, sensitive fields),
                            api_endpoints.tsv (parameterless GET endpoints from published OpenAPI schemas: status, type, size)
   scan/                    nmap outputs (.nmap, .xml, .gnmap) for HVTs, auto-discovered IPs, and edge devices
