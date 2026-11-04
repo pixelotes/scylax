@@ -75,6 +75,38 @@ class ResilienceTests(unittest.TestCase):
         self.assertEqual(get("https://fine.example/x").status, 200)
 
 
+class SensitiveProbeTests(unittest.TestCase):
+    def test_dead_host_is_abandoned_after_three_failures_and_others_still_probed(self):
+        from collections import Counter
+        from recon.sensitive_paths import SensitivePath, probe_sensitive_paths
+
+        paths = [SensitivePath(f"/p{i}", "x", "low", r"HIT", "t") for i in range(10)]
+        calls = Counter()
+
+        def get(url, **k):
+            host = url.split("/")[2]
+            calls[host] += 1
+            if host == "dead":
+                return resp(0)
+            return resp(200, "HIT") if url.endswith("/p3") else resp(404)
+
+        seen = []
+        hits = probe_sensitive_paths(["https://dead", "https://ok1", "https://ok2"], get, paths=paths, delay=0,
+                                     progress=lambda d, t: seen.append((d, t)))
+        self.assertEqual(calls["dead"], 3)
+        self.assertEqual((calls["ok1"], calls["ok2"]), (10, 10))
+        self.assertEqual([h.url for h in hits], ["https://ok1/p3", "https://ok2/p3"])  # input order kept
+        self.assertEqual(seen[-1], (3, 3))
+
+    def test_limiter_stops_calling_a_host_that_never_answers(self):
+        lim = AdaptiveLimiter(sleep=lambda s: None)
+        calls = []
+        get = lim.wrap(lambda url, **k: (calls.append(url), resp(0))[1])
+        for _ in range(6):
+            get("https://down.example/x")
+        self.assertEqual(len(calls), 3)
+
+
 class CheckpointTests(unittest.TestCase):
     def test_done_only_for_same_scope_signature(self):
         with tempfile.TemporaryDirectory() as d:

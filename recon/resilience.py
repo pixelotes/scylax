@@ -59,14 +59,17 @@ class AdaptiveLimiter:
         base_delay: float = 0.0,
         max_delay: float = 10.0,
         give_up_after: int = 8,
+        dead_after: int = 3,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.base_delay = base_delay
         self.max_delay = max_delay
         self.give_up_after = give_up_after
+        self.dead_after = dead_after  # consecutive timeouts/connection errors before a host is left alone
         self._sleep = sleep
         self._extra: dict[str, float] = {}
         self._streak: dict[str, int] = {}
+        self._dead: dict[str, int] = {}
         self._lock = threading.Lock()
 
     @staticmethod
@@ -79,10 +82,11 @@ class AdaptiveLimiter:
 
     def gave_up(self, host: str) -> bool:
         with self._lock:
-            return self._streak.get(host, 0) >= self.give_up_after
+            return self._streak.get(host, 0) >= self.give_up_after or self._dead.get(host, 0) >= self.dead_after
 
     def report(self, host: str, status: int) -> None:
         with self._lock:
+            self._dead[host] = self._dead.get(host, 0) + 1 if status == 0 else 0
             if status in THROTTLE_STATUSES:
                 self._streak[host] = self._streak.get(host, 0) + 1
                 cur = self._extra.get(host, 0.0)

@@ -847,7 +847,11 @@ def _sensitive_path_fallback(ctx: RunContext, log: Logger, targets: list[str]) -
         for t in targets if urllib.parse.urlparse(t).netloc
     })
     log.info(f"Sensitive-path probe: {len(SENSITIVE_PATHS)} curated paths on {len(bases)} owned base URL(s)")
-    hits = probe_sensitive_paths(bases, AdaptiveLimiter().wrap(http_get))
+    def progress(done: int, total: int) -> None:
+        if total >= 20 and done % 10 == 0 and done < total:
+            log.info(f"Sensitive-path probe: {done}/{total} hosts")
+
+    hits = probe_sensitive_paths(bases, AdaptiveLimiter().wrap(http_get), progress=progress)
     rows = [f"{h.url}\t{h.category}\t{h.severity}\t{h.title}\t{h.snippet}" for h in hits]
     (ctx.web_dir / "sensitive_paths.tsv").write_text("".join(f"{r}\n" for r in rows), encoding="utf-8")
     record_virtual_cmd(

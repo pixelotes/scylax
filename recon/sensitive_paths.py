@@ -127,17 +127,31 @@ def probe_sensitive_paths(
     paths: Iterable[SensitivePath] = SENSITIVE_PATHS,
     delay: float = 0.1,
     max_bytes: int = 4096,
+    workers: int = 8,
+    dead_after: int = 3,
+    progress: Callable[[int, int], None] | None = None,
 ) -> list[SensitiveHit]:
     """GET each path on each base URL (no redirects followed) and keep the ones
-    whose response matches the entry's signature."""
-    hits: list[SensitiveHit] = []
+    whose response matches the entry's signature.
+
+    Hosts are probed in parallel (``workers``) but each host is walked sequentially
+    with ``delay`` between requests, so no single host sees more load than before.
+    A host that fails to answer ``dead_after`` requests in a row (timeout / connection
+    error) is treated as unreachable and left alone instead of paying every timeout."""
+    from concurrent.futures import ThreadPoolExecutor
+
     entries = tuple(paths)
-    for base in base_urls:
-        base = base.rstrip("/")
+    bases = [b.rstrip("/") for b in base_urls]
+    done = 0
+
+    def probe_base(base: str) -> list[SensitiveHit]:
+        hits: list[SensitiveHit] = []
+        failures = 0
         for entry in entries:
             url = f"{base}{entry.path}"
             resp = http_get(url, timeout=8.0, verify_ssl=False, follow_redirects=False, max_bytes=max_bytes)
             status = getattr(resp, "status", 0)
+            failures = failures + 1 if status == 0 else 0
             if status in entry.statuses:
                 headers = getattr(resp, "headers", {}) or {}
                 text = "\n".join(f"{k}: {v}" for k, v in headers.items()) + "\n" + (getattr(resp, "body", "") or "")
@@ -145,6 +159,17 @@ def probe_sensitive_paths(
                 if m:
                     snippet = m.group(0).strip().replace("\t", " ").replace("\r", " ").replace("\n", " ")[:120]
                     hits.append(SensitiveHit(url, entry.category, entry.severity, entry.title, snippet))
+            if failures >= dead_after:
+                break
             if delay:
                 time.sleep(delay)
-    return hits
+        return hits
+
+    results: list[list[SensitiveHit]] = []
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        for hits in pool.map(probe_base, bases):  # keeps the input order
+            results.append(hits)
+            done += 1
+            if progress:
+                progress(done, len(bases))
+    return [h for hits in results for h in hits]
