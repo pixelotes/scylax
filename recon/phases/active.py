@@ -498,7 +498,10 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
             )
             log.ok(f"[{idx}/{total}] {ip}: {ports_csv}")
 
-    if hasattr(os, "geteuid") and os.geteuid() == 0:
+    # nmap -sU needs raw sockets: root on the host, or nmap running in a
+    # container (which runs as root with CAP_NET_RAW by default).
+    nmap_in_docker = dm.get_provider("nmap") == "docker"
+    if nmap_in_docker or (hasattr(os, "geteuid") and os.geteuid() == 0):
         for idx, ip in enumerate(target_ips, 1):
             udp_prefix = ctx.scan_dir / f"udp_{ip}"
             log.info(f"[{idx}/{total}] Scanning UDP VPN ports on {ip}...")
@@ -525,7 +528,7 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 title=f"nmap UDP ({ip})",
             )
     else:
-        log.warn("UDP scan of VPN ports not performed (requires root; re-run with sudo for IKE/IPsec 500/4500)")
+        log.warn("UDP scan of VPN ports not performed (requires root; re-run with sudo or --docker for IKE/IPsec 500/4500)")
 
 
 def phase4b(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
