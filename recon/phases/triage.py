@@ -10,7 +10,7 @@ import urllib.parse
 
 from recon.config import RunContext
 from recon.deps import DependencyManager
-from recon.report import generate_reports
+from recon.report import generate_reports, nsg_ports
 from recon.webprobe import is_hash_label, is_ingress_default_404
 from recon.runner import (
     Logger,
@@ -682,7 +682,7 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 nsg = parts[0].strip()
                 rg = parts[1].strip()
                 rule = parts[2].strip()
-                ports = _nsg_ports(parts[3])
+                ports = nsg_ports(parts[3])
                 nics = parts[4].strip() if len(parts) > 4 else "0"
                 nic_names = [n for n in (parts[5].split(",") if len(parts) > 5 else []) if n]
                 nsg_id = parts[6].strip() if len(parts) > 6 else ""
@@ -1098,22 +1098,6 @@ _URL_KEY_PREFIXES = ("cookie:", "cors:", "dirlist:", "exposed-api:", "exposed-pa
 _HOST_KEY_PREFIXES = ("api-data:", "data-export:", "hash-host:")
 _DOMAIN_KEY_PREFIXES = ("apex:", "axfr:", "caa:", "dmarc:", "dnssec:", "spf:", "whois:", "wildcard:",
                         "internal-name:")
-
-
-def _nsg_ports(raw: str) -> str:
-    """NSG port field as '22' or '443,80'.
-
-    Runs before the fix stored destinationPortRange glued to the JSON text of
-    destinationPortRanges ('22[]', '["443","80"]')."""
-    raw = raw.strip()
-    if "[" not in raw:
-        return raw
-    single, _, rest = raw.partition("[")
-    try:
-        ranges = [str(x) for x in json.loads("[" + rest) if x]
-    except ValueError:
-        ranges = []
-    return ",".join([single] if single else ranges)
 
 
 def finding_target(key: str) -> str:

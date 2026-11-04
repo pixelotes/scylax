@@ -112,6 +112,22 @@ def _escape_md_cell(text: str) -> str:
     return text.replace("|", "\\|").replace("\r", "").replace("\n", " ")
 
 
+def nsg_ports(raw: str) -> str:
+    """NSG port field as '22' or '443,80'.
+
+    Runs before the fix stored destinationPortRange glued to the JSON text of
+    destinationPortRanges ('22[]', '["443","80"]')."""
+    raw = raw.strip()
+    if "[" not in raw:
+        return raw
+    single, _, rest = raw.partition("[")
+    try:
+        ranges = [str(x) for x in json.loads("[" + rest) if x]
+    except ValueError:
+        ranges = []
+    return ",".join([single] if single else ranges)
+
+
 def _target_html(target: str) -> str:
     """Finding target cell: URLs become links, anything else stays as code."""
     if not target:
@@ -502,7 +518,7 @@ class RunData:
                     "nsg": parts[0].strip() if len(parts) > 0 else "",
                     "resource_group": parts[1].strip() if len(parts) > 1 else "",
                     "rule": parts[2].strip() if len(parts) > 2 else "",
-                    "ports": parts[3].strip() if len(parts) > 3 else "",
+                    "ports": nsg_ports(parts[3]) if len(parts) > 3 else "",
                     "attached_nics": parts[4].strip() if len(parts) > 4 else "0",
                 })
         return rules
