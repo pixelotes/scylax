@@ -424,6 +424,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         saas_posture=bool(args.saas_posture or scope.saas_posture),
         quick_scan=bool(args.quick or scope.quick_scan),
         explicit_phases=explicit_phases,
+        resume=args.resume,
         top_ports=(
             args.top_ports if args.top_ports is not None
             else scope.top_ports if scope.top_ports is not None

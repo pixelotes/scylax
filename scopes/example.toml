@@ -212,6 +212,8 @@ misconfig_delay_ms = 1000
 nmap_max_rate = 400           # packets/sec for HVT and cloud scans
 edge_max_rate = 40            # packets/sec for fragile edge fingerprinting
 nuclei_rate = 50              # requests/sec
+nuclei_batch_size = 15        # targets per nuclei run (about 1.5 min per host at 50 req/s)
+nuclei_batch_timeout_min = 40 # a batch that exceeds this is stopped; its partial findings are kept
 httpx_rate = 50               # requests/sec
 
 # Phase 4 service scans also enumerate TLS protocols/ciphers (nmap ssl-enum-ciphers) for the TLS posture

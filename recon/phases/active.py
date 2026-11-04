@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -764,42 +765,79 @@ def phase8(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     if not nuclei_ok:
         _sensitive_path_fallback(ctx, log, filtered_targets)
         return
-    res = ev(
-        ctx.console_dir,
-        "8",
-        dm.build_cmd(
-            "nuclei",
-            [
-                "-l",
-                str(nuclei_targets_file),
-                "-exclude-tags",
-                "intrusive,dos,fuzz,brute,default-login,xss,sqli,rce,lfi",
-                "-severity",
-                "medium,high,critical",
-                "-rate-limit",
-                str(ctx.scope.nuclei_rate),
-                "-silent",
-                "-jsonl",
-                "-o",
-                str(nuclei_jsonl),
-            ],
-        ),
-        timeout=1800,
-        title="nuclei scan",
-    )
+    # nuclei runs in batches: one slow or hung batch (nuclei needs ~1.5 min per host with
+    # medium+ templates at the default rate) costs only that batch, never the whole phase,
+    # and the findings of batches that finished are kept.
+    size = max(1, int(getattr(ctx.scope, "nuclei_batch_size", 15) or 15))
+    batch_timeout = max(5, int(getattr(ctx.scope, "nuclei_batch_timeout_min", 40) or 40)) * 60
+    batches = [filtered_targets[i:i + size] for i in range(0, len(filtered_targets), size)]
+    for stale in list(ctx.web_dir.glob("nuclei_*.jsonl")) + list(ctx.web_dir.glob("nuclei_batch_*.txt")):
+        if not ctx.resume:
+            stale.unlink()
+    for marker in ctx.web_dir.glob(".nuclei_*.done"):
+        if not ctx.resume:
+            marker.unlink()
+    log.info(f"nuclei: {len(filtered_targets)} target(s) in {len(batches)} batch(es) of up to {size}, "
+             f"{batch_timeout // 60} min limit per batch")
 
-    if res.returncode != 0 or infra_failure(res):
-        record_tool_failure(ctx.run_dir, "8", "nuclei", infra_failure(res) or f"exit {res.returncode}")
-        log.warn("nuclei failed - running the native sensitive-path probe as a fallback")
-        _sensitive_path_fallback(ctx, log, filtered_targets)
-        return
-
-    findings_count = 0
-    if nuclei_jsonl.is_file():
-        findings_count = sum(
-            1 for line in nuclei_jsonl.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()
+    failed_targets: list[str] = []
+    failures: list[str] = []
+    out_files: list[Path] = []
+    for n, batch in enumerate(batches, 1):
+        sig = hashlib.sha256("\n".join(batch).encode()).hexdigest()[:8]
+        batch_file = ctx.web_dir / f"nuclei_batch_{sig}.txt"
+        batch_out = ctx.web_dir / f"nuclei_{sig}.jsonl"
+        marker = ctx.web_dir / f".nuclei_{sig}.done"
+        out_files.append(batch_out)
+        if marker.is_file():
+            log.info(f"nuclei batch {n}/{len(batches)}: reused (--resume)")
+            continue
+        batch_file.write_text("\n".join(batch) + "\n", encoding="utf-8")
+        log.info(f"nuclei batch {n}/{len(batches)}: {len(batch)} target(s)")
+        res = ev(
+            ctx.console_dir,
+            "8",
+            dm.build_cmd(
+                "nuclei",
+                [
+                    "-l",
+                    str(batch_file),
+                    "-exclude-tags",
+                    "intrusive,dos,fuzz,brute,default-login,xss,sqli,rce,lfi",
+                    "-severity",
+                    "medium,high,critical",
+                    "-rate-limit",
+                    str(ctx.scope.nuclei_rate),
+                    "-silent",
+                    "-jsonl",
+                    "-o",
+                    str(batch_out),
+                ],
+            ),
+            timeout=batch_timeout,
+            title=f"nuclei scan (batch {n}/{len(batches)})",
         )
-    log.ok(f"nuclei: {findings_count} findings")
+        reason = infra_failure(res) or (f"exit {res.returncode}" if res.returncode != 0 else "")
+        if reason:
+            failed_targets += batch
+            failures.append(f"batch {n}: {reason}")
+            log.warn(f"nuclei batch {n}/{len(batches)} failed ({reason}); its partial findings are kept and "
+                     f"its {len(batch)} target(s) get the native sensitive-path probe")
+        else:
+            marker.write_text("done\n", encoding="utf-8")
+
+    # One file for the triage, merged from every batch (including partial output of failed ones)
+    merged = [line for f in out_files if f.is_file()
+              for line in f.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]
+    nuclei_jsonl.write_text("".join(f"{l}\n" for l in merged), encoding="utf-8")
+
+    if failures:
+        record_tool_failure(
+            ctx.run_dir, "8", "nuclei",
+            f"{len(failures)} of {len(batches)} batch(es) failed ({failures[0].split(': ', 1)[1]})",
+        )
+        _sensitive_path_fallback(ctx, log, failed_targets)
+    log.ok(f"nuclei: {len(merged)} findings from {len(batches) - len(failures)}/{len(batches)} batch(es)")
 
 
 def _sensitive_path_fallback(ctx: RunContext, log: Logger, targets: list[str]) -> None:

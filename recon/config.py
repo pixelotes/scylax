@@ -119,6 +119,8 @@ class ScopeConfig:
     nmap_max_rate: int = 400
     edge_max_rate: int = 40
     nuclei_rate: int = 50
+    nuclei_batch_size: int = 15
+    nuclei_batch_timeout_min: int = 40
     httpx_rate: int = 50
     use_amass: bool = True
     tls_enum_ciphers: bool = True
@@ -398,6 +400,8 @@ class ScopeConfig:
             httpx_rate=int(flat.get("httpx_rate", 50)),
             use_amass=use_amass,
             amass_timeout_min=int(flat.get("amass_timeout_min", 10)),
+            nuclei_batch_size=int(flat.get("nuclei_batch_size") or 15),
+            nuclei_batch_timeout_min=int(flat.get("nuclei_batch_timeout_min") or 40),
             tls_enum_ciphers=str(flat.get("tls_enum_ciphers", True)).strip().lower() not in ("0", "false", "no"),
             quick_scan=bool(flat.get("quick_scan", False) or flat.get("quick", False)),
             top_ports=int(flat["top_ports"]) if flat.get("top_ports") else None,
@@ -434,6 +438,7 @@ class RunContext:
     quick_scan: bool = False
     top_ports: int | None = None
     explicit_phases: bool = False
+    resume: bool = False
 
     def __post_init__(self) -> None:
         if self.skip_cloud:
@@ -575,7 +580,8 @@ _SCOPE_SCHEMA: dict[str, tuple[str, ...]] = {
         "owned_ranges", "owned_ips_file", "auto_discover", "auto_discover_targets",
         "skip_portscan_orgs", "apex_trusted_orgs", "use_amass",
         "edge_ports", "edge_max_rate", "nmap_max_rate", "httpx_rate", "nuclei_rate",
-        "amass_timeout_min", "tls_enum_ciphers", "top_ports", "quick", "quick_scan",
+        "amass_timeout_min", "tls_enum_ciphers", "nuclei_batch_size", "nuclei_batch_timeout_min",
+        "top_ports", "quick", "quick_scan",
         "min_apache", "min_nginx", "min_routeros",
         "shodan_api_key", "shodan_key", "hibp_api_key", "hibp_key",
     ),
@@ -596,7 +602,8 @@ _SCOPE_SCHEMA: dict[str, tuple[str, ...]] = {
     "content_discovery": ("content_discovery", "enabled", "wordlist", "rate",
                           "content_discovery_wordlist", "content_discovery_rate"),
     "limits": ("edge_max_rate", "nmap_max_rate", "httpx_rate", "nuclei_rate",
-               "amass_timeout_min", "tls_enum_ciphers", "top_ports", "edge_ports"),
+               "amass_timeout_min", "tls_enum_ciphers", "nuclei_batch_size", "nuclei_batch_timeout_min",
+               "top_ports", "edge_ports"),
     "thresholds": ("min_apache", "min_nginx", "min_routeros"),
 }
 
