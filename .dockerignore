@@ -1,0 +1,9 @@
+# Only the code goes into the image: never real scopes, evidence or local state
+*
+!scylax.py
+!LICENSE
+!README.md
+!recon/
+!scopes/example.toml
+**/__pycache__
+**/*.pyc
