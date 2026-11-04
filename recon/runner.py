@@ -17,9 +17,32 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Sequence
 
+from recon.redact import redact
+
 
 class PipelineError(Exception):
     """Raised when a fatal pipeline condition is encountered."""
+
+
+class _DryRun:
+    """Plan recorder for --dry-run: commands and HTTP requests are listed, never executed."""
+
+    def __init__(self) -> None:
+        self.active = False
+        self.phase = ""
+        self.root = ""  # temp runs dir, shown as <run> in the plan
+        self.commands: list[tuple[str, str]] = []
+        self.requests: list[tuple[str, str]] = []
+
+    def reset(self) -> None:
+        self.__init__()  # type: ignore[misc]
+
+
+DRY_RUN = _DryRun()
+
+
+def dry_run_active() -> bool:
+    return DRY_RUN.active
 
 
 class Logger:
@@ -27,6 +50,9 @@ class Logger:
         self.gaps_file = gaps_file
 
     def _c(self, code: str, msg: str) -> None:
+        if DRY_RUN.active and DRY_RUN.phase:
+            return  # phase results are empty in a dry run: their messages would only mislead
+        msg = redact(msg)
         if sys.stderr.isatty():
             sys.stderr.write(f"\033[{code}m{msg}\033[0m\n")
         else:
@@ -40,6 +66,9 @@ class Logger:
         self._c("32", f"[+] {msg}")
 
     def warn(self, msg: str) -> None:
+        if DRY_RUN.active and DRY_RUN.phase:
+            return
+        msg = redact(msg)
         self._c("33", f"[!] {msg}")
         if self.gaps_file is not None:
             self.gaps_file.parent.mkdir(parents=True, exist_ok=True)
@@ -81,6 +110,9 @@ def run_cmd(
     cwd: Path | None = None,
 ) -> CmdResult:
     cmd_list = [str(a) for a in args]
+    if DRY_RUN.active:
+        DRY_RUN.commands.append((DRY_RUN.phase, shlex.join(cmd_list)))
+        return CmdResult(args=cmd_list, returncode=0, stdout="", stderr="")
     try:
         proc = subprocess.run(
             cmd_list,
@@ -131,7 +163,9 @@ def record_virtual_cmd(
     """Record a command execution (or virtual command) to <phase>.log and commands.jsonl."""
     console_dir.mkdir(parents=True, exist_ok=True)
     log_path = console_dir / f"{phase}.log"
-    clean_out = output.rstrip()
+    cmd_str = redact(cmd_str)
+    title = redact(title)
+    clean_out = redact(output.rstrip())
     block = f"$ {cmd_str}\n{clean_out}\n\n"
     with log_path.open("a", encoding="utf-8") as f:
         f.write(block)
@@ -304,6 +338,9 @@ def http_get(
     """GET a URL. ``max_bytes`` caps how much of the body is read (and asks the
     server for that range), so probes can classify a response without
     downloading it."""
+    if DRY_RUN.active:
+        DRY_RUN.requests.append((DRY_RUN.phase, f"{method} {url}"))
+        return HttpResponse(status=0, body="", headers={}, final_url=url, redirect_url="")
     ctx = ssl.create_default_context()
     if not verify_ssl:
         ctx.check_hostname = False
@@ -383,3 +420,34 @@ def ver_lt(v_actual: str, v_floor: str) -> bool:
     if not a or not b:
         return False
     return a < b
+
+
+def dry_run_report() -> str:
+    """Human-readable plan: commands in full, HTTP requests grouped by host."""
+    import urllib.parse
+
+    probe_re = re.compile(r"( -version| --version| -V| -v| version)$|^theHarvester -h$|^gh auth status$")
+    lines: list[str] = []
+    phases = [ph for ph in dict.fromkeys([p for p, _ in DRY_RUN.commands] + [p for p, _ in DRY_RUN.requests]) if ph]
+    for ph in phases:
+        lines.append(f"== Phase {ph}")
+        shown: list[str] = []
+        for p, cmd in DRY_RUN.commands:
+            if p == ph and not probe_re.search(cmd):
+                c = redact(cmd)
+                if DRY_RUN.root:
+                    for form in (DRY_RUN.root, DRY_RUN.root.removeprefix("/private")):
+                        c = c.replace(form, "<runs>")
+                if c not in shown:
+                    shown.append(c)
+        lines.extend(f"  $ {c}" for c in shown)
+        by_host: dict[str, list[str]] = {}
+        for p, req in DRY_RUN.requests:
+            if p == ph:
+                method, url = req.split(" ", 1)
+                u = urllib.parse.urlsplit(url)
+                by_host.setdefault(u.netloc, []).append(f"{method} {u.path or '/'}")
+        for host, reqs in by_host.items():
+            sample = ", ".join(list(dict.fromkeys(reqs))[:3])
+            lines.append(f"  HTTP {host}: {len(reqs)} request(s) e.g. {redact(sample)}")
+    return "\n".join(lines)

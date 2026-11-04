@@ -37,11 +37,16 @@ from recon.runner import (
     record_virtual_cmd,
     run_cmd,
 )
+from recon.resilience import BREAKERS, http_get_retry
 from recon.osint_keys import collect_keys, write_configs
 from recon.nvd import cpe_to_23, load_kev_ids, nvd_cves_for_cpe
 from recon.scope import ScopeGuard
 from recon.takeover import check_takeover
 from recon.webprobe import is_hash_label
+
+
+# TLDs that can never exist on the public internet, so passive internet sources know nothing about them.
+NON_PUBLIC_TLDS = frozenset({"local", "localhost", "internal", "lan", "home", "corp", "intranet", "test", "invalid", "example"})
 
 
 def _prepare_key_args(
@@ -95,6 +100,9 @@ def _phase1(ctx: RunContext, dm: DependencyManager, log: Logger, sf_args: list[s
             ct_first_seen[name] = day
 
     for d in ctx.scope.domains:
+        if d.rsplit(".", 1)[-1].lower() in NON_PUBLIC_TLDS:
+            log.info(f"{d}: non-public TLD, subfinder/amass/crt.sh skipped (nothing to find on the internet)")
+            continue
         # 1. subfinder
         if dm.is_available("subfinder"):
             cmd = dm.build_cmd("subfinder", ["-d", d, "-all", "-silent", *sf_args])
@@ -105,7 +113,9 @@ def _phase1(ctx: RunContext, dm: DependencyManager, log: Logger, sf_args: list[s
                     all_raw_lines.append(s)
 
         # 2. amass (passive)
-        if ctx.scope.use_amass and dm.is_available("amass"):
+        if ctx.scope.use_amass and dm.is_available("amass") and not BREAKERS.allow("amass"):
+            log.warn(f"amass skipped for {d}: it timed out on {BREAKERS.threshold} domains in a row")
+        elif ctx.scope.use_amass and dm.is_available("amass"):
             amass_timeout = ctx.scope.amass_timeout_min * 60 + 120
             cmd = dm.build_cmd(
                 "amass",
@@ -127,6 +137,10 @@ def _phase1(ctx: RunContext, dm: DependencyManager, log: Logger, sf_args: list[s
                 for m in amass_re.finditer(subs.stdout):
                     all_raw_lines.append(m.group(0))
                     harvested += 1
+            if res.timed_out:
+                BREAKERS.failure("amass")
+            elif res.returncode == 0:
+                BREAKERS.success("amass")
             if res.timed_out:
                 log.warn(
                     f"amass timed out for {d} after {amass_timeout}s "
@@ -564,32 +578,24 @@ def phase6(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     log.info("Phase 6 - historical URLs (Wayback CDX) & potential entry points")
     ctx.ensure_dirs()
 
-    # TLDs that can never exist on the public internet (so never in the archive).
-    non_public_tlds = {"local", "localhost", "internal", "lan", "home", "corp", "intranet", "test", "invalid", "example"}
-    retry_delays = (0, 5, 15, 30)  # Wayback CDX returns transient 503s under load
-
     for d in ctx.scope.domains:
         tld = d.rsplit(".", 1)[-1].lower()
-        if tld in non_public_tlds:
+        if tld in NON_PUBLIC_TLDS:
             log.info(f"Wayback CDX for {d} skipped (non-public TLD, never archived)")
+            continue
+        if not BREAKERS.allow("wayback"):
+            log.warn(f"Wayback CDX for {d} skipped: {BREAKERS.threshold} consecutive failures, source looks down")
             continue
 
         url = f"https://web.archive.org/cdx/search/cdx?url=*.{d}/*&output=txt&fl=original&collapse=urlkey"
-        resp = None
-        for attempt, delay in enumerate(retry_delays, start=1):
-            if delay:
-                time.sleep(delay)
-            resp = http_get(url, timeout=180)
-            if resp.status == 200:
-                break
-            # 4xx (except 429) won't improve on retry
-            if 400 <= resp.status < 500 and resp.status != 429:
-                break
-            log.warn(
-                f"Wayback CDX for {d}: HTTP {resp.status or 'timeout/connection error'} "
-                f"(attempt {attempt}/{len(retry_delays)})"
-            )
-        assert resp is not None
+        resp = http_get_retry(
+            url,
+            source="wayback",
+            timeout=180,
+            on_retry=lambda n, total, r, d=d: log.warn(
+                f"Wayback CDX for {d}: HTTP {r.status or 'timeout/connection error'} (attempt {n}/{total})"
+            ),
+        )
         (ctx.osint_dir / f"wayback_{d}.txt").write_text(resp.body if resp.status == 200 else "", encoding="utf-8")
         if resp.status != 200:
             log.warn(f"Wayback CDX for {d} failed (last status: {resp.status or 'timeout/connection error'})")

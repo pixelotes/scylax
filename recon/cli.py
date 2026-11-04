@@ -6,16 +6,20 @@ import argparse
 import datetime
 import os
 import re
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Sequence
 
 from recon.config import ACTIVE_PHASES, DEFAULT_PHASES, RunContext, ScopeConfig, validate_scope
+from recon import checkpoint, redact
 from recon.deps import DependencyManager
 from recon.phases import PHASE_MAP, active, cloud, osint, saas, triage
 from recon.ai_bundle import report_from_bundle
 from recon.report import generate_reports
-from recon.runner import TOOL_FAILURES_FILE, Logger, have, http_get, load_tool_failures, reset_phase_console
+from recon.runner import DRY_RUN, TOOL_FAILURES_FILE, Logger, dry_run_active, dry_run_report, have, http_get, load_tool_failures, reset_phase_console
+from recon.resilience import BREAKERS
 from recon.venv_manager import ensure_venv
 
 
@@ -172,6 +176,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="HaveIBeenPwned API key for domain/account breach audit (or set HIBP_API_KEY)",
     )
     parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the commands and HTTP requests each phase would issue, run nothing and write no evidence "
+             "(commands that depend on earlier phases' discoveries cannot be listed)",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="skip phases already completed (without tool failures) in this run folder; scope edits invalidate them",
+    )
+    parser.add_argument(
         "--check-deps",
         action="store_true",
         help="check and display all tool dependencies (native vs Docker) and exit",
@@ -224,8 +239,11 @@ def preflight(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
             log.warn(f"{st.plugin.name} not available ({st.plugin.install_macos}) - phase {'/'.join(used_by)} degraded")
 
     if not ok_req:
-        log.error("Missing required dependencies for requested phases. Install them or try --docker.")
-        sys.exit(1)
+        if dry_run_active():
+            log.warn("Missing required dependencies (dry-run continues; a real run would stop here)")
+        else:
+            log.error("Missing required dependencies for requested phases. Install them or try --docker.")
+            sys.exit(1)
 
     if "7" in effective_phases and not ctx.shodan_api_key:
         log.warn("SHODAN_API_KEY not set - Shodan host lookup in phase 7 skipped (Nmap CPE -> CVEDB correlation will still run)")
@@ -253,7 +271,12 @@ def preflight(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
     # Check authorization for active phases
     has_active = any(p in ACTIVE_PHASES for p in effective_phases) and not ctx.skip_active
-    if has_active:
+    if has_active and dry_run_active():
+        if not ctx.scope.authorised_by:
+            log.warn("authorised_by is empty: a real run of the active phases would be refused")
+        else:
+            log.info(f"Active scanning authorised by {ctx.scope.authorised_by} ({ctx.scope.authorisation_ref})")
+    elif has_active:
         if not ctx.scope.authorised_by:
             log.error(f"{ctx.scope.path}: authorised_by is empty. Active phases need written authorisation (or use -P / --passive-only).")
             sys.exit(1)
@@ -373,6 +396,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Cloud annexes named explicitly (-p or $PHASES) run even without provider config.
     explicit_phases = args.phases != " ".join(DEFAULT_PHASES)
 
+    dry_dir: str | None = None
+    if args.dry_run:
+        # Nothing is executed or written to the real runs folder; triage has nothing to triage.
+        phases = [p for p in phases if p != "T"]
+        dry_dir = tempfile.mkdtemp(prefix="scylax-dryrun-")
+        scope.runs_dir = dry_dir
+        DRY_RUN.root = str(Path(dry_dir).resolve())
+        DRY_RUN.reset()
+        DRY_RUN.active = True
+        log.info("DRY RUN: listing what each phase would execute; no command is run and no evidence is written")
+
     ctx = RunContext(
         root=Path.cwd(),
         scope=scope,
@@ -400,8 +434,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     log.gaps_file = ctx.run_dir / "gaps.txt"
     # gaps.txt describes this run: a re-run that collects evidence starts it afresh
     # (a triage-only re-run keeps the gaps of the run it reports on).
-    if any(p != "T" for p in ctx.phases) and log.gaps_file.is_file():
+    if any(p != "T" for p in ctx.phases) and log.gaps_file.is_file() and not args.resume:
         log.gaps_file.unlink()
+
+    # Never let a key reach evidence files or warnings, whatever tool echoes it.
+    redact.register(ctx.shodan_api_key, ctx.hibp_api_key)
+    redact.register(*(v for k, v in scope.intel_keys.items() if not k.endswith(("_username", "_id"))))
+    redact.register(*(os.environ.get(v) for v in ("M365_CLIENT_SECRET", "GITHUB_TOKEN", "GH_TOKEN", "NVD_API_KEY")))
+    if scope.has_secrets() and (scope_path.stat().st_mode & 0o077):
+        log.warn(f"{scope_path} holds API keys but is readable by other users: chmod 600 {scope_path}")
 
     # API plugins are detected through their environment variables: expose keys
     # that came from the scope file or the command line the same way.
@@ -419,21 +460,40 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Phase dispatch table
     phase_dispatch = PHASE_MAP
 
-    for p in ctx.phases:
-        reason = ctx.phase_skip_reason(p)
-        if reason:
-            log.info(f"skip phase {p} ({reason})")
-            continue
-        fn = phase_dispatch.get(p)
-        if fn is None:
-            log.warn(f"unknown phase {p}")
-            continue
-        reset_phase_console(ctx.console_dir, p)
-        _clear_tool_failures(ctx.run_dir, p)
-        fn(ctx, dm, log)
-        for ph, tool, reason in load_tool_failures(ctx.run_dir):
-            if ph == p:
-                log.warn(f"{tool} failed in phase {p} ({reason}) - its results are missing; findings it would report are not re-checked")
+    BREAKERS.reset()
+    scope_sig = checkpoint.scope_signature(scope_path)
+    try:
+        for p in ctx.phases:
+            reason = ctx.phase_skip_reason(p)
+            if reason:
+                log.info(f"skip phase {p} ({reason})")
+                continue
+            fn = phase_dispatch.get(p)
+            if fn is None:
+                log.warn(f"unknown phase {p}")
+                continue
+            if args.resume and p != "T" and checkpoint.is_done(ctx.run_dir, p, scope_sig):
+                log.info(f"skip phase {p} (already completed in this run folder; --resume)")
+                continue
+            DRY_RUN.phase = p
+            reset_phase_console(ctx.console_dir, p)
+            _clear_tool_failures(ctx.run_dir, p)
+            checkpoint.clear(ctx.run_dir, p)
+            fn(ctx, dm, log)
+            failed = [(tool, why) for ph, tool, why in load_tool_failures(ctx.run_dir) if ph == p]
+            for tool, why in failed:
+                log.warn(f"{tool} failed in phase {p} ({why}) - its results are missing; findings it would report are not re-checked")
+            if not failed and not dry_run_active() and p != "T":
+                checkpoint.mark_done(ctx.run_dir, p, scope_sig)
+
+        if dry_run_active():
+            print()
+            print("DRY RUN PLAN (commands and requests that depend on earlier results or on a first response are not listed):")
+            print(dry_run_report() or "  (nothing to execute)")
+            return 0
+    finally:
+        if dry_dir:
+            shutil.rmtree(dry_dir, ignore_errors=True)
 
     log.ok(f"Done. Evidence: {ctx.run_dir}")
     return 0
