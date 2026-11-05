@@ -299,6 +299,21 @@
     border: 1px solid #334155;
   }
 
+  /* Asset inventory helpers */
+  .muted { color: var(--text-secondary); opacity: 0.75; }
+  .card-subtitle { color: var(--text-secondary); font-size: 0.8rem; font-weight: 400; margin-left: 0.5rem; }
+  a.asset-link { text-decoration: none; }
+  a.asset-link:hover code.pill { border-color: var(--accent); color: var(--accent); }
+  tr.asset-flash { animation: assetFlash 1.6s ease; }
+  @keyframes assetFlash { 0% { background: rgba(56,189,248,0.25); } 100% { background: transparent; } }
+  code.pill.pill-critical { color: #fca5a5; border-color: rgba(239,68,68,0.5); }
+  code.pill.pill-high { color: #fdba74; border-color: rgba(249,115,22,0.5); }
+  code.pill.pill-medium { color: #fde047; border-color: rgba(234,179,8,0.5); }
+  code.pill.pill-low { color: #93c5fd; border-color: rgba(59,130,246,0.5); }
+  code.pill.pill-info { color: #d1d5db; border-color: rgba(107,114,128,0.5); }
+  .kpi-card.clickable { cursor: pointer; }
+  .kpi-card.clickable:hover { border-color: var(--border-bright); transform: translateY(-2px); }
+
   /* Filter Controls */
   .filter-bar {
     display: flex;
@@ -499,6 +514,9 @@
     <button class="nav-tab" data-tab="tab-findings">
       Findings &amp; Weaknesses <span class="tab-badge">43</span>
     </button>
+    <button class="nav-tab" data-tab="tab-assets">
+      Assets <span class="tab-badge">26</span>
+    </button>
     <button class="nav-tab" data-tab="tab-hosts">
       Hosts, Services &amp; CVEs <span class="tab-badge">6</span>
     </button>
@@ -523,7 +541,7 @@
     
     <div class="kpi-section-title">Severity KPI Cards</div>
     <div class="kpi-grid">
-      <div class="kpi-card kpi-critical">
+      <div class="kpi-card kpi-critical clickable" data-jump-sev="CRITICAL" title="Show critical findings">
         <div class="kpi-top">
           <span class="kpi-label">Critical</span>
           <span class="badge badge-critical">Critical</span>
@@ -531,7 +549,7 @@
         <div class="kpi-value">4</div>
         <div class="kpi-subtext">RCE / Exposed Mgmt</div>
       </div>
-      <div class="kpi-card kpi-high">
+      <div class="kpi-card kpi-high clickable" data-jump-sev="HIGH" title="Show high findings">
         <div class="kpi-top">
           <span class="kpi-label">High</span>
           <span class="badge badge-high">High</span>
@@ -539,7 +557,7 @@
         <div class="kpi-value">12</div>
         <div class="kpi-subtext">Direct Takeover / Gaps</div>
       </div>
-      <div class="kpi-card kpi-medium">
+      <div class="kpi-card kpi-medium clickable" data-jump-sev="MEDIUM" title="Show medium findings">
         <div class="kpi-top">
           <span class="kpi-label">Medium</span>
           <span class="badge badge-medium">Medium</span>
@@ -547,7 +565,7 @@
         <div class="kpi-value">19</div>
         <div class="kpi-subtext">Email / TLS / Service Posture</div>
       </div>
-      <div class="kpi-card kpi-low">
+      <div class="kpi-card kpi-low clickable" data-jump-sev="LOW" title="Show low findings">
         <div class="kpi-top">
           <span class="kpi-label">Low</span>
           <span class="badge badge-low">Low</span>
@@ -555,7 +573,7 @@
         <div class="kpi-value">6</div>
         <div class="kpi-subtext">Defensive Headers / Hardening</div>
       </div>
-      <div class="kpi-card">
+      <div class="kpi-card clickable" data-jump-sev="ALL" title="Show all findings">
         <div class="kpi-top">
           <span class="kpi-label">Info / Total</span>
           <span class="badge badge-info">Total</span>
@@ -688,7 +706,7 @@
             <button class="filter-pill" data-filter="LOW">Low (6)</button>
             <button class="filter-pill" data-filter="INFO">Info (2)</button>
           </div>
-          <input type="text" class="search-input" id="finding-search-input" placeholder="Search title, key, evidence...">
+          <input type="text" class="search-input" id="finding-search-input" placeholder="Search title, target, key, evidence...">
         </div>
 
         <div class="table-responsive">
@@ -696,231 +714,359 @@
             <thead>
               <tr>
                 <th style="width: 110px;">Severity</th>
+                <th style="width: 110px;">Asset</th>
                 <th>Finding Title</th>
+                <th>Target</th>
                 <th>Affected Asset / Evidence</th>
                 <th style="width: 220px;">Rule Key</th>
               </tr>
             </thead>
             <tbody>
-              <tr class="finding-row" data-severity="CRITICAL" data-text="2 global administrators without mfa registered m365-admin-no-mfa accounts admin-backup@contoso.com, breakglass-svc@contoso.com have global admin role without mfa registered">
+              <tr class="finding-row" data-severity="CRITICAL" data-asset="CLOUD-002" data-text="management / legacy service ms-wbt-server exposed 198.51.100.52 mgmt:198.51.100.52:3389 198.51.100.52:3389 microsoft terminal services cloud-002">
                 <td><span class="badge badge-critical">CRITICAL</span></td>
-                <td><strong>2 Global Administrators without MFA registered</strong></td>
-                <td class="mono"><code>Accounts admin-backup@contoso.com, breakglass-svc@contoso.com have Global Admin role without MFA registered</code></td>
-                <td><code class="pill">m365-admin-no-mfa</code></td>
-              </tr><tr class="finding-row" data-severity="CRITICAL" data-text="end-of-life routeros 6.48.6 on branch office edge gateway routeros:203.0.113.45 203.0.113.45:8291 mikrotik routeros 6.48.6 (routeros winbox)">
-                <td><span class="badge badge-critical">CRITICAL</span></td>
-                <td><strong>End-of-life RouterOS 6.48.6 on branch office edge gateway</strong></td>
-                <td class="mono"><code>203.0.113.45:8291 MikroTik RouterOS 6.48.6 (RouterOS winbox)</code></td>
-                <td><code class="pill">routeros:203.0.113.45</code></td>
-              </tr><tr class="finding-row" data-severity="CRITICAL" data-text="management / legacy service ms-wbt-server exposed mgmt:198.51.100.52:3389 198.51.100.52:3389 microsoft terminal services">
-                <td><span class="badge badge-critical">CRITICAL</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="CLOUD-002"><code class="pill">CLOUD-002</code></a></td>
                 <td><strong>Management / legacy service ms-wbt-server exposed</strong></td>
+                <td class="mono"><code>198.51.100.52</code></td>
                 <td class="mono"><code>198.51.100.52:3389 Microsoft Terminal Services</code></td>
                 <td><code class="pill">mgmt:198.51.100.52:3389</code></td>
-              </tr><tr class="finding-row" data-severity="CRITICAL" data-text="remote desktop services rce cve-2024-38077 (cisa kev) cve:198.51.100.52:cve-2024-38077 198.51.100.52:3389 microsoft remote desktop services (cvss 9.8)">
+              </tr><tr class="finding-row" data-severity="CRITICAL" data-asset="CLOUD-002" data-text="remote desktop services rce cve-2024-38077 (cisa kev) 198.51.100.52 cve:198.51.100.52:cve-2024-38077 198.51.100.52:3389 microsoft remote desktop services (cvss 9.8) cloud-002">
                 <td><span class="badge badge-critical">CRITICAL</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="CLOUD-002"><code class="pill">CLOUD-002</code></a></td>
                 <td><strong>Remote Desktop Services RCE CVE-2024-38077 (CISA KEV)</strong></td>
+                <td class="mono"><code>198.51.100.52</code></td>
                 <td class="mono"><code>198.51.100.52:3389 Microsoft Remote Desktop Services (CVSS 9.8)</code></td>
                 <td><code class="pill">cve:198.51.100.52:CVE-2024-38077</code></td>
-              </tr><tr class="finding-row" data-severity="HIGH" data-text="apache 2.4.49 path traversal &amp; rce cve-2021-41773 (cisa kev) cve:203.0.113.19:cve-2021-41773 203.0.113.19:80 apache/2.4.49 (unix) mod_ssl/2.4.49">
+              </tr><tr class="finding-row" data-severity="CRITICAL" data-asset="ROUTER-001" data-text="end-of-life routeros 6.48.6 on branch office edge gateway 203.0.113.45 routeros:203.0.113.45 203.0.113.45:8291 mikrotik routeros 6.48.6 (routeros winbox) router-001">
+                <td><span class="badge badge-critical">CRITICAL</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="ROUTER-001"><code class="pill">ROUTER-001</code></a></td>
+                <td><strong>End-of-life RouterOS 6.48.6 on branch office edge gateway</strong></td>
+                <td class="mono"><code>203.0.113.45</code></td>
+                <td class="mono"><code>203.0.113.45:8291 MikroTik RouterOS 6.48.6 (RouterOS winbox)</code></td>
+                <td><code class="pill">routeros:203.0.113.45</code></td>
+              </tr><tr class="finding-row" data-severity="CRITICAL" data-asset="" data-text="2 global administrators without mfa registered  m365-admin-no-mfa accounts admin-backup@contoso.com, breakglass-svc@contoso.com have global admin role without mfa registered ">
+                <td><span class="badge badge-critical">CRITICAL</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>2 Global Administrators without MFA registered</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>Accounts admin-backup@contoso.com, breakglass-svc@contoso.com have Global Admin role without MFA registered</code></td>
+                <td><code class="pill">m365-admin-no-mfa</code></td>
+              </tr><tr class="finding-row" data-severity="HIGH" data-asset="FW-001" data-text="firewall / router admin gui on the internet 198.51.100.90 fw-admin:198.51.100.90 login | opnsense at https://198.51.100.90/ (port 443) fw-001">
                 <td><span class="badge badge-high">HIGH</span></td>
-                <td><strong>Apache 2.4.49 Path Traversal &amp; RCE CVE-2021-41773 (CISA KEV)</strong></td>
-                <td class="mono"><code>203.0.113.19:80 Apache/2.4.49 (Unix) mod_ssl/2.4.49</code></td>
-                <td><code class="pill">cve:203.0.113.19:CVE-2021-41773</code></td>
-              </tr><tr class="finding-row" data-severity="HIGH" data-text="azure storage account stcontosoexports allows public blob access az-storage-public:stcontosoexports rg-contoso-storage/stcontosoexports allowblobpublicaccess=true">
-                <td><span class="badge badge-high">HIGH</span></td>
-                <td><strong>Azure Storage Account stcontosoexports allows public blob access</strong></td>
-                <td class="mono"><code>rg-contoso-storage/stcontosoexports allowBlobPublicAccess=true</code></td>
-                <td><code class="pill">az-storage-public:stcontosoexports</code></td>
-              </tr><tr class="finding-row" data-severity="HIGH" data-text="conditional access without a policy requiring mfa for all users m365-ca-no-mfa-all no active conditional access policy enforces mfa for all users across all cloud apps">
-                <td><span class="badge badge-high">HIGH</span></td>
-                <td><strong>Conditional Access without a policy requiring MFA for all users</strong></td>
-                <td class="mono"><code>No active Conditional Access policy enforces MFA for all users across all cloud apps</code></td>
-                <td><code class="pill">m365-ca-no-mfa-all</code></td>
-              </tr><tr class="finding-row" data-severity="HIGH" data-text="domain breach history: contoso marketing portal leak (2023-04-18) hibp:contoso.com:contosomarketing2023 18400 accounts, exposed: email addresses;passwords;job titles">
-                <td><span class="badge badge-high">HIGH</span></td>
-                <td><strong>Domain breach history: Contoso Marketing Portal Leak (2023-04-18)</strong></td>
-                <td class="mono"><code>18400 accounts, exposed: Email addresses;Passwords;Job titles</code></td>
-                <td><code class="pill">hibp:contoso.com:ContosoMarketing2023</code></td>
-              </tr><tr class="finding-row" data-severity="HIGH" data-text="exposed environment configuration (.env) path:dev-portal.fabrikam.io/.env https://dev-portal.fabrikam.io/.env contains app_key and db_password">
-                <td><span class="badge badge-high">HIGH</span></td>
-                <td><strong>Exposed environment configuration (.env)</strong></td>
-                <td class="mono"><code>https://dev-portal.fabrikam.io/.env contains APP_KEY and DB_PASSWORD</code></td>
-                <td><code class="pill">path:dev-portal.fabrikam.io/.env</code></td>
-              </tr><tr class="finding-row" data-severity="HIGH" data-text="exposed openapi / swagger specification path:api-staging.northwindtraders.com/v2/api-docs https://api-staging.northwindtraders.com/v2/api-docs (swagger 2.0 api spec)">
-                <td><span class="badge badge-high">HIGH</span></td>
-                <td><strong>Exposed OpenAPI / Swagger specification</strong></td>
-                <td class="mono"><code>https://api-staging.northwindtraders.com/v2/api-docs (Swagger 2.0 API spec)</code></td>
-                <td><code class="pill">path:api-staging.northwindtraders.com/v2/api-docs</code></td>
-              </tr><tr class="finding-row" data-severity="HIGH" data-text="firewall / router admin gui on the internet fw-admin:198.51.100.90 login | opnsense at https://198.51.100.90/ (port 443)">
-                <td><span class="badge badge-high">HIGH</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="FW-001"><code class="pill">FW-001</code></a></td>
                 <td><strong>Firewall / router admin GUI on the internet</strong></td>
+                <td class="mono"><code>198.51.100.90</code></td>
                 <td class="mono"><code>Login | OPNsense at https://198.51.100.90/ (port 443)</code></td>
                 <td><code class="pill">fw-admin:198.51.100.90</code></td>
-              </tr><tr class="finding-row" data-severity="HIGH" data-text="oauth grant with mail.readwrite to allprincipals m365-oauth-allprincipals-mail delegated permission mail.readwrite consented for allprincipals scope on contosomailsyncapp">
+              </tr><tr class="finding-row" data-severity="HIGH" data-asset="WEB-001" data-text="apache 2.4.49 path traversal &amp; rce cve-2021-41773 (cisa kev) 203.0.113.19 cve:203.0.113.19:cve-2021-41773 203.0.113.19:80 apache/2.4.49 (unix) mod_ssl/2.4.49 web-001">
                 <td><span class="badge badge-high">HIGH</span></td>
-                <td><strong>OAuth grant with Mail.ReadWrite to AllPrincipals</strong></td>
-                <td class="mono"><code>Delegated permission Mail.ReadWrite consented for AllPrincipals scope on ContosoMailSyncApp</code></td>
-                <td><code class="pill">m365-oauth-allprincipals-mail</code></td>
-              </tr><tr class="finding-row" data-severity="HIGH" data-text="open secret scanning alerts in organization repositories gh-secret-scanning-alerts 2 unresolved secret scanning alerts in contoso-org/contoso-api">
+                <td><a class="asset-link" href="#" data-asset-id="WEB-001"><code class="pill">WEB-001</code></a></td>
+                <td><strong>Apache 2.4.49 Path Traversal &amp; RCE CVE-2021-41773 (CISA KEV)</strong></td>
+                <td class="mono"><code>203.0.113.19</code></td>
+                <td class="mono"><code>203.0.113.19:80 Apache/2.4.49 (Unix) mod_ssl/2.4.49</code></td>
+                <td><code class="pill">cve:203.0.113.19:CVE-2021-41773</code></td>
+              </tr><tr class="finding-row" data-severity="HIGH" data-asset="WEB-002" data-text="exposed openapi / swagger specification api-staging.northwindtraders.com path:api-staging.northwindtraders.com/v2/api-docs https://api-staging.northwindtraders.com/v2/api-docs (swagger 2.0 api spec) web-002">
                 <td><span class="badge badge-high">HIGH</span></td>
-                <td><strong>Open secret scanning alerts in organization repositories</strong></td>
-                <td class="mono"><code>2 unresolved secret scanning alerts in contoso-org/contoso-api</code></td>
-                <td><code class="pill">gh-secret-scanning-alerts</code></td>
-              </tr><tr class="finding-row" data-severity="HIGH" data-text="organization does not require 2fa for 3 members gh-org-2fa-disabled 3 members without 2fa registered in contoso-org; two_factor_requirement_enabled=false">
+                <td><a class="asset-link" href="#" data-asset-id="WEB-002"><code class="pill">WEB-002</code></a></td>
+                <td><strong>Exposed OpenAPI / Swagger specification</strong></td>
+                <td class="mono"><code>api-staging.northwindtraders.com</code></td>
+                <td class="mono"><code>https://api-staging.northwindtraders.com/v2/api-docs (Swagger 2.0 API spec)</code></td>
+                <td><code class="pill">path:api-staging.northwindtraders.com/v2/api-docs</code></td>
+              </tr><tr class="finding-row" data-severity="HIGH" data-asset="WEB-004" data-text="exposed environment configuration (.env) dev-portal.fabrikam.io path:dev-portal.fabrikam.io/.env https://dev-portal.fabrikam.io/.env contains app_key and db_password web-004">
                 <td><span class="badge badge-high">HIGH</span></td>
-                <td><strong>Organization does not require 2FA for 3 members</strong></td>
-                <td class="mono"><code>3 members without 2FA registered in contoso-org; two_factor_requirement_enabled=false</code></td>
-                <td><code class="pill">gh-org-2fa-disabled</code></td>
-              </tr><tr class="finding-row" data-severity="HIGH" data-text="sensitive files in wayback history wayback-critical 18 urls with config/sql/backup extensions">
+                <td><a class="asset-link" href="#" data-asset-id="WEB-004"><code class="pill">WEB-004</code></a></td>
+                <td><strong>Exposed environment configuration (.env)</strong></td>
+                <td class="mono"><code>dev-portal.fabrikam.io</code></td>
+                <td class="mono"><code>https://dev-portal.fabrikam.io/.env contains APP_KEY and DB_PASSWORD</code></td>
+                <td><code class="pill">path:dev-portal.fabrikam.io/.env</code></td>
+              </tr><tr class="finding-row" data-severity="HIGH" data-asset="WEB-006" data-text="unauthenticated directory listing files.northwindtraders.com dirlist:https://files.northwindtraders.com/exports/ https://files.northwindtraders.com/exports/ (index of /exports) web-006">
                 <td><span class="badge badge-high">HIGH</span></td>
-                <td><strong>Sensitive files in Wayback history</strong></td>
-                <td class="mono"><code>18 URLs with config/sql/backup extensions</code></td>
-                <td><code class="pill">wayback-critical</code></td>
-              </tr><tr class="finding-row" data-severity="HIGH" data-text="unauthenticated directory listing dirlist:https://files.northwindtraders.com/exports/ https://files.northwindtraders.com/exports/ (index of /exports)">
-                <td><span class="badge badge-high">HIGH</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="WEB-006"><code class="pill">WEB-006</code></a></td>
                 <td><strong>Unauthenticated directory listing</strong></td>
+                <td class="mono"><code>files.northwindtraders.com</code></td>
                 <td class="mono"><code>https://files.northwindtraders.com/exports/ (Index of /exports)</code></td>
                 <td><code class="pill">dirlist:https://files.northwindtraders.com/exports/</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-text="14 active guest users with access to tenant resources m365-guest-users-active 14 external guest user accounts active; 4 have not signed in for over 180 days">
+              </tr><tr class="finding-row" data-severity="HIGH" data-asset="" data-text="azure storage account stcontosoexports allows public blob access  az-storage-public:stcontosoexports rg-contoso-storage/stcontosoexports allowblobpublicaccess=true ">
+                <td><span class="badge badge-high">HIGH</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>Azure Storage Account stcontosoexports allows public blob access</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>rg-contoso-storage/stcontosoexports allowBlobPublicAccess=true</code></td>
+                <td><code class="pill">az-storage-public:stcontosoexports</code></td>
+              </tr><tr class="finding-row" data-severity="HIGH" data-asset="" data-text="organization does not require 2fa for 3 members  gh-org-2fa-disabled 3 members without 2fa registered in contoso-org; two_factor_requirement_enabled=false ">
+                <td><span class="badge badge-high">HIGH</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>Organization does not require 2FA for 3 members</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>3 members without 2FA registered in contoso-org; two_factor_requirement_enabled=false</code></td>
+                <td><code class="pill">gh-org-2fa-disabled</code></td>
+              </tr><tr class="finding-row" data-severity="HIGH" data-asset="" data-text="open secret scanning alerts in organization repositories  gh-secret-scanning-alerts 2 unresolved secret scanning alerts in contoso-org/contoso-api ">
+                <td><span class="badge badge-high">HIGH</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>Open secret scanning alerts in organization repositories</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>2 unresolved secret scanning alerts in contoso-org/contoso-api</code></td>
+                <td><code class="pill">gh-secret-scanning-alerts</code></td>
+              </tr><tr class="finding-row" data-severity="HIGH" data-asset="" data-text="domain breach history: contoso marketing portal leak (2023-04-18)  hibp:contoso.com:contosomarketing2023 18400 accounts, exposed: email addresses;passwords;job titles ">
+                <td><span class="badge badge-high">HIGH</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>Domain breach history: Contoso Marketing Portal Leak (2023-04-18)</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>18400 accounts, exposed: Email addresses;Passwords;Job titles</code></td>
+                <td><code class="pill">hibp:contoso.com:ContosoMarketing2023</code></td>
+              </tr><tr class="finding-row" data-severity="HIGH" data-asset="" data-text="conditional access without a policy requiring mfa for all users  m365-ca-no-mfa-all no active conditional access policy enforces mfa for all users across all cloud apps ">
+                <td><span class="badge badge-high">HIGH</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>Conditional Access without a policy requiring MFA for all users</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>No active Conditional Access policy enforces MFA for all users across all cloud apps</code></td>
+                <td><code class="pill">m365-ca-no-mfa-all</code></td>
+              </tr><tr class="finding-row" data-severity="HIGH" data-asset="" data-text="oauth grant with mail.readwrite to allprincipals  m365-oauth-allprincipals-mail delegated permission mail.readwrite consented for allprincipals scope on contosomailsyncapp ">
+                <td><span class="badge badge-high">HIGH</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>OAuth grant with Mail.ReadWrite to AllPrincipals</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>Delegated permission Mail.ReadWrite consented for AllPrincipals scope on ContosoMailSyncApp</code></td>
+                <td><code class="pill">m365-oauth-allprincipals-mail</code></td>
+              </tr><tr class="finding-row" data-severity="HIGH" data-asset="" data-text="sensitive files in wayback history  wayback-critical 18 urls with config/sql/backup extensions ">
+                <td><span class="badge badge-high">HIGH</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>Sensitive files in Wayback history</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>18 URLs with config/sql/backup extensions</code></td>
+                <td><code class="pill">wayback-critical</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="ASSET-001" data-text="fabrikam.io apex resolves to infrastructure not in our inventory 192.0.2.77 apex:fabrikam.io 192.0.2.77 (digitalocean, llc) asset-001">
                 <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><strong>14 active guest users with access to tenant resources</strong></td>
-                <td class="mono"><code>14 external guest user accounts active; 4 have not signed in for over 180 days</code></td>
-                <td><code class="pill">m365-guest-users-active</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-text="6 repos without branch protection gh-repo-no-branch-protection repositories contoso-api, northwind-web, fabrikam-core, data-pipeline, devops-tools, staging-env lack default branch protection">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><strong>6 repos without branch protection</strong></td>
-                <td class="mono"><code>Repositories contoso-api, northwind-web, fabrikam-core, data-pipeline, devops-tools, staging-env lack default branch protection</code></td>
-                <td><code class="pill">gh-repo-no-branch-protection</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-text="app registration secret expired m365-app-secret-expired client secret for app contoso-crm-connector expired on 2026-10-15">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><strong>App registration secret expired</strong></td>
-                <td class="mono"><code>Client secret for app contoso-crm-connector expired on 2026-10-15</code></td>
-                <td><code class="pill">m365-app-secret-expired</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-text="azure sql server sql-contoso-erp has public network access enabled az-sql-public:sql-contoso-erp rg-contoso-erp-prod/sql-contoso-erp publicnetworkaccess=enabled">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><strong>Azure SQL Server sql-contoso-erp has public network access enabled</strong></td>
-                <td class="mono"><code>rg-contoso-erp-prod/sql-contoso-erp publicNetworkAccess=Enabled</code></td>
-                <td><code class="pill">az-sql-public:sql-contoso-erp</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-text="azure storage account stnorthwindlogs allows unencrypted http traffic az-storage-http:stnorthwindlogs rg-northwind-data/stnorthwindlogs supportshttpstrafficonly=false">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><strong>Azure Storage Account stnorthwindlogs allows unencrypted HTTP traffic</strong></td>
-                <td class="mono"><code>rg-northwind-data/stnorthwindlogs supportsHttpsTrafficOnly=false</code></td>
-                <td><code class="pill">az-storage-http:stnorthwindlogs</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-text="domain breach history: northwind customer support leak (2022-11-05) hibp:northwindtraders.com:northwindsupport2022 9350 accounts, exposed: email addresses;names;phone numbers">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><strong>Domain breach history: Northwind Customer Support Leak (2022-11-05)</strong></td>
-                <td class="mono"><code>9350 accounts, exposed: Email addresses;Names;Phone numbers</code></td>
-                <td><code class="pill">hibp:northwindtraders.com:NorthwindSupport2022</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-text="expired tls certificate cert-expired:203.0.113.88 203.0.113.88 expired 2026-08-14">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><strong>Expired TLS certificate</strong></td>
-                <td class="mono"><code>203.0.113.88 expired 2026-08-14</code></td>
-                <td><code class="pill">cert-expired:203.0.113.88</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-text="fabrikam.io apex resolves to infrastructure not in our inventory apex:fabrikam.io 192.0.2.77 (digitalocean, llc)">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="ASSET-001"><code class="pill">ASSET-001</code></a></td>
                 <td><strong>fabrikam.io apex resolves to infrastructure not in our inventory</strong></td>
+                <td class="mono"><code>192.0.2.77</code></td>
                 <td class="mono"><code>192.0.2.77 (DigitalOcean, LLC)</code></td>
                 <td><code class="pill">apex:fabrikam.io</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-text="fabrikam.io has no dmarc p=reject dmarc:fabrikam.io v=dmarc1; p=none; rua=mailto:dmarc@fabrikam.io">
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="ASSET-002" data-text="gcp firewall allows tcp:22 from internet 0.0.0.0 gcp-fw:allow-ssh-legacy contoso-analytics-prod/allow-ssh-legacy (source: 0.0.0.0/0) asset-002">
                 <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><strong>fabrikam.io has no DMARC p=reject</strong></td>
-                <td class="mono"><code>v=DMARC1; p=none; rua=mailto:dmarc@fabrikam.io</code></td>
-                <td><code class="pill">dmarc:fabrikam.io</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-text="gcp firewall allows tcp:22 from internet gcp-fw:allow-ssh-legacy contoso-analytics-prod/allow-ssh-legacy (source: 0.0.0.0/0)">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="ASSET-002"><code class="pill">ASSET-002</code></a></td>
                 <td><strong>GCP firewall allows tcp:22 from Internet</strong></td>
+                <td class="mono"><code>0.0.0.0</code></td>
                 <td class="mono"><code>contoso-analytics-prod/allow-ssh-legacy (source: 0.0.0.0/0)</code></td>
                 <td><code class="pill">gcp-fw:allow-ssh-legacy</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-text="internal-named host publicly resolvable internal-name:vpn-internal.contoso.com vpn-internal.contoso.com -&gt; 198.51.100.15">
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="DOMAIN-001" data-text="webhook without ssl verification ci.contoso.com gh-webhook-ssl-insecure webhook url https://ci.contoso.com/gh-hook in contoso-org/northwind-web has ssl verification disabled domain-001">
                 <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><strong>Internal-named host publicly resolvable</strong></td>
-                <td class="mono"><code>vpn-internal.contoso.com -&gt; 198.51.100.15</code></td>
-                <td><code class="pill">internal-name:vpn-internal.contoso.com</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-text="key vault kv-contoso-prod has purge protection disabled az-kv-purge:kv-contoso-prod rg-contoso-security/kv-contoso-prod enablepurgeprotection=false">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><strong>Key Vault kv-contoso-prod has purge protection disabled</strong></td>
-                <td class="mono"><code>rg-contoso-security/kv-contoso-prod enablePurgeProtection=false</code></td>
-                <td><code class="pill">az-kv-purge:kv-contoso-prod</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-text="key vault kv-northwind-dev has purge protection disabled az-kv-purge:kv-northwind-dev rg-northwind-security/kv-northwind-dev enablepurgeprotection=false">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><strong>Key Vault kv-northwind-dev has purge protection disabled</strong></td>
-                <td class="mono"><code>rg-northwind-security/kv-northwind-dev enablePurgeProtection=false</code></td>
-                <td><code class="pill">az-kv-purge:kv-northwind-dev</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-text="microsoft defender for cloud disabled (free tier) for sqlservers az-defender-free:sqlservers pricingtier=free">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><strong>Microsoft Defender for Cloud disabled (Free tier) for SqlServers</strong></td>
-                <td class="mono"><code>pricingTier=Free</code></td>
-                <td><code class="pill">az-defender-free:SqlServers</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-text="microsoft defender for cloud disabled (free tier) for storageaccounts az-defender-free:storageaccounts pricingtier=free">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><strong>Microsoft Defender for Cloud disabled (Free tier) for StorageAccounts</strong></td>
-                <td class="mono"><code>pricingTier=Free</code></td>
-                <td><code class="pill">az-defender-free:StorageAccounts</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-text="microsoft defender for cloud disabled (free tier) for virtualmachines az-defender-free:virtualmachines pricingtier=free">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><strong>Microsoft Defender for Cloud disabled (Free tier) for VirtualMachines</strong></td>
-                <td class="mono"><code>pricingTier=Free</code></td>
-                <td><code class="pill">az-defender-free:VirtualMachines</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-text="nsg allows 3389 from internet nsg:nsg-contoso-erp-prod:allow-rdp-internet rg-contoso-erp-prod/nsg-contoso-erp-prod rule allow-rdp-internet (nics: nic-contoso-erp-01)">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><strong>NSG allows 3389 from Internet</strong></td>
-                <td class="mono"><code>rg-contoso-erp-prod/nsg-contoso-erp-prod rule Allow-RDP-Internet (nics: nic-contoso-erp-01)</code></td>
-                <td><code class="pill">nsg:nsg-contoso-erp-prod:Allow-RDP-Internet</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-text="stale user accounts inactive for &gt;90 days m365-stale-accounts 8 enabled user accounts with lastsignindatetime older than 90 days">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><strong>Stale user accounts inactive for &gt;90 days</strong></td>
-                <td class="mono"><code>8 enabled user accounts with lastSignInDateTime older than 90 days</code></td>
-                <td><code class="pill">m365-stale-accounts</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-text="webhook without ssl verification gh-webhook-ssl-insecure webhook url https://ci.contoso.com/gh-hook in contoso-org/northwind-web has ssl verification disabled">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="DOMAIN-001"><code class="pill">DOMAIN-001</code></a></td>
                 <td><strong>Webhook without SSL verification</strong></td>
+                <td class="mono"><code>ci.contoso.com</code></td>
                 <td class="mono"><code>Webhook URL https://ci.contoso.com/gh-hook in contoso-org/northwind-web has SSL verification disabled</code></td>
                 <td><code class="pill">gh-webhook-ssl-insecure</code></td>
-              </tr><tr class="finding-row" data-severity="LOW" data-text="azure storage account stcontosobackups uses legacy tls (tls1_1) az-storage-tls:stcontosobackups rg-contoso-storage/stcontosobackups minimumtlsversion=tls1_1">
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="K8S-003" data-text="expired tls certificate 203.0.113.88 cert-expired:203.0.113.88 203.0.113.88 expired 2026-08-14 k8s-003">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="K8S-003"><code class="pill">K8S-003</code></a></td>
+                <td><strong>Expired TLS certificate</strong></td>
+                <td class="mono"><code>203.0.113.88</code></td>
+                <td class="mono"><code>203.0.113.88 expired 2026-08-14</code></td>
+                <td><code class="pill">cert-expired:203.0.113.88</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="VPN-001" data-text="internal-named host publicly resolvable 198.51.100.15 internal-name:vpn-internal.contoso.com vpn-internal.contoso.com -&gt; 198.51.100.15 vpn-001">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="VPN-001"><code class="pill">VPN-001</code></a></td>
+                <td><strong>Internal-named host publicly resolvable</strong></td>
+                <td class="mono"><code>198.51.100.15</code></td>
+                <td class="mono"><code>vpn-internal.contoso.com -&gt; 198.51.100.15</code></td>
+                <td><code class="pill">internal-name:vpn-internal.contoso.com</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="microsoft defender for cloud disabled (free tier) for sqlservers  az-defender-free:sqlservers pricingtier=free ">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>Microsoft Defender for Cloud disabled (Free tier) for SqlServers</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>pricingTier=Free</code></td>
+                <td><code class="pill">az-defender-free:SqlServers</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="microsoft defender for cloud disabled (free tier) for storageaccounts  az-defender-free:storageaccounts pricingtier=free ">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>Microsoft Defender for Cloud disabled (Free tier) for StorageAccounts</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>pricingTier=Free</code></td>
+                <td><code class="pill">az-defender-free:StorageAccounts</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="microsoft defender for cloud disabled (free tier) for virtualmachines  az-defender-free:virtualmachines pricingtier=free ">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>Microsoft Defender for Cloud disabled (Free tier) for VirtualMachines</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>pricingTier=Free</code></td>
+                <td><code class="pill">az-defender-free:VirtualMachines</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="key vault kv-contoso-prod has purge protection disabled  az-kv-purge:kv-contoso-prod rg-contoso-security/kv-contoso-prod enablepurgeprotection=false ">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>Key Vault kv-contoso-prod has purge protection disabled</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>rg-contoso-security/kv-contoso-prod enablePurgeProtection=false</code></td>
+                <td><code class="pill">az-kv-purge:kv-contoso-prod</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="key vault kv-northwind-dev has purge protection disabled  az-kv-purge:kv-northwind-dev rg-northwind-security/kv-northwind-dev enablepurgeprotection=false ">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>Key Vault kv-northwind-dev has purge protection disabled</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>rg-northwind-security/kv-northwind-dev enablePurgeProtection=false</code></td>
+                <td><code class="pill">az-kv-purge:kv-northwind-dev</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="azure sql server sql-contoso-erp has public network access enabled  az-sql-public:sql-contoso-erp rg-contoso-erp-prod/sql-contoso-erp publicnetworkaccess=enabled ">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>Azure SQL Server sql-contoso-erp has public network access enabled</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>rg-contoso-erp-prod/sql-contoso-erp publicNetworkAccess=Enabled</code></td>
+                <td><code class="pill">az-sql-public:sql-contoso-erp</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="azure storage account stnorthwindlogs allows unencrypted http traffic  az-storage-http:stnorthwindlogs rg-northwind-data/stnorthwindlogs supportshttpstrafficonly=false ">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>Azure Storage Account stnorthwindlogs allows unencrypted HTTP traffic</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>rg-northwind-data/stnorthwindlogs supportsHttpsTrafficOnly=false</code></td>
+                <td><code class="pill">az-storage-http:stnorthwindlogs</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="fabrikam.io has no dmarc p=reject  dmarc:fabrikam.io v=dmarc1; p=none; rua=mailto:dmarc@fabrikam.io ">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>fabrikam.io has no DMARC p=reject</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>v=DMARC1; p=none; rua=mailto:dmarc@fabrikam.io</code></td>
+                <td><code class="pill">dmarc:fabrikam.io</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="6 repos without branch protection  gh-repo-no-branch-protection repositories contoso-api, northwind-web, fabrikam-core, data-pipeline, devops-tools, staging-env lack default branch protection ">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>6 repos without branch protection</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>Repositories contoso-api, northwind-web, fabrikam-core, data-pipeline, devops-tools, staging-env lack default branch protection</code></td>
+                <td><code class="pill">gh-repo-no-branch-protection</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="domain breach history: northwind customer support leak (2022-11-05)  hibp:northwindtraders.com:northwindsupport2022 9350 accounts, exposed: email addresses;names;phone numbers ">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>Domain breach history: Northwind Customer Support Leak (2022-11-05)</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>9350 accounts, exposed: Email addresses;Names;Phone numbers</code></td>
+                <td><code class="pill">hibp:northwindtraders.com:NorthwindSupport2022</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="app registration secret expired  m365-app-secret-expired client secret for app contoso-crm-connector expired on 2026-10-15 ">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>App registration secret expired</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>Client secret for app contoso-crm-connector expired on 2026-10-15</code></td>
+                <td><code class="pill">m365-app-secret-expired</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="14 active guest users with access to tenant resources  m365-guest-users-active 14 external guest user accounts active; 4 have not signed in for over 180 days ">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>14 active guest users with access to tenant resources</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>14 external guest user accounts active; 4 have not signed in for over 180 days</code></td>
+                <td><code class="pill">m365-guest-users-active</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="stale user accounts inactive for &gt;90 days  m365-stale-accounts 8 enabled user accounts with lastsignindatetime older than 90 days ">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>Stale user accounts inactive for &gt;90 days</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>8 enabled user accounts with lastSignInDateTime older than 90 days</code></td>
+                <td><code class="pill">m365-stale-accounts</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="nsg allows 3389 from internet  nsg:nsg-contoso-erp-prod:allow-rdp-internet rg-contoso-erp-prod/nsg-contoso-erp-prod rule allow-rdp-internet (nics: nic-contoso-erp-01) ">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>NSG allows 3389 from Internet</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>rg-contoso-erp-prod/nsg-contoso-erp-prod rule Allow-RDP-Internet (nics: nic-contoso-erp-01)</code></td>
+                <td><code class="pill">nsg:nsg-contoso-erp-prod:Allow-RDP-Internet</code></td>
+              </tr><tr class="finding-row" data-severity="LOW" data-asset="WEB-010" data-text="public website missing security headers www.contoso.com headers:www https://www.contoso.com: permissions-policy x-content-type-options web-010">
                 <td><span class="badge badge-low">LOW</span></td>
-                <td><strong>Azure Storage Account stcontosobackups uses legacy TLS (TLS1_1)</strong></td>
-                <td class="mono"><code>rg-contoso-storage/stcontosobackups minimumTlsVersion=TLS1_1</code></td>
-                <td><code class="pill">az-storage-tls:stcontosobackups</code></td>
-              </tr><tr class="finding-row" data-severity="LOW" data-text="azure storage account stnorthwindlogs uses legacy tls (tls1_0) az-storage-tls:stnorthwindlogs rg-northwind-data/stnorthwindlogs minimumtlsversion=tls1_0">
-                <td><span class="badge badge-low">LOW</span></td>
-                <td><strong>Azure Storage Account stnorthwindlogs uses legacy TLS (TLS1_0)</strong></td>
-                <td class="mono"><code>rg-northwind-data/stnorthwindlogs minimumTlsVersion=TLS1_0</code></td>
-                <td><code class="pill">az-storage-tls:stnorthwindlogs</code></td>
-              </tr><tr class="finding-row" data-severity="LOW" data-text="conditional access policies in report-only mode m365-ca-report-only policy ca003-legacyauthblock configured in report-only mode (not enforced)">
-                <td><span class="badge badge-low">LOW</span></td>
-                <td><strong>Conditional Access policies in report-only mode</strong></td>
-                <td class="mono"><code>Policy CA003-LegacyAuthBlock configured in report-only mode (not enforced)</code></td>
-                <td><code class="pill">m365-ca-report-only</code></td>
-              </tr><tr class="finding-row" data-severity="LOW" data-text="dnssec unsigned on fabrikam.io dnssec:fabrikam.io dig dnskey fabrikam.io">
-                <td><span class="badge badge-low">LOW</span></td>
-                <td><strong>DNSSEC unsigned on fabrikam.io</strong></td>
-                <td class="mono"><code>dig DNSKEY fabrikam.io</code></td>
-                <td><code class="pill">dnssec:fabrikam.io</code></td>
-              </tr><tr class="finding-row" data-severity="LOW" data-text="no caa on fabrikam.io caa:fabrikam.io dig caa fabrikam.io">
-                <td><span class="badge badge-low">LOW</span></td>
-                <td><strong>No CAA on fabrikam.io</strong></td>
-                <td class="mono"><code>dig CAA fabrikam.io</code></td>
-                <td><code class="pill">caa:fabrikam.io</code></td>
-              </tr><tr class="finding-row" data-severity="LOW" data-text="public website missing security headers headers:www https://www.contoso.com: permissions-policy x-content-type-options">
-                <td><span class="badge badge-low">LOW</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="WEB-010"><code class="pill">WEB-010</code></a></td>
                 <td><strong>Public website missing security headers</strong></td>
+                <td class="mono"><code>www.contoso.com</code></td>
                 <td class="mono"><code>https://www.contoso.com: permissions-policy x-content-type-options</code></td>
                 <td><code class="pill">headers:www</code></td>
-              </tr><tr class="finding-row" data-severity="INFO" data-text="mfa compliance at 91% m365-mfa-compliance 242 of 266 total licensed users in contoso.com tenant have registered mfa authentication methods">
+              </tr><tr class="finding-row" data-severity="LOW" data-asset="" data-text="azure storage account stcontosobackups uses legacy tls (tls1_1)  az-storage-tls:stcontosobackups rg-contoso-storage/stcontosobackups minimumtlsversion=tls1_1 ">
+                <td><span class="badge badge-low">LOW</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>Azure Storage Account stcontosobackups uses legacy TLS (TLS1_1)</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>rg-contoso-storage/stcontosobackups minimumTlsVersion=TLS1_1</code></td>
+                <td><code class="pill">az-storage-tls:stcontosobackups</code></td>
+              </tr><tr class="finding-row" data-severity="LOW" data-asset="" data-text="azure storage account stnorthwindlogs uses legacy tls (tls1_0)  az-storage-tls:stnorthwindlogs rg-northwind-data/stnorthwindlogs minimumtlsversion=tls1_0 ">
+                <td><span class="badge badge-low">LOW</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>Azure Storage Account stnorthwindlogs uses legacy TLS (TLS1_0)</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>rg-northwind-data/stnorthwindlogs minimumTlsVersion=TLS1_0</code></td>
+                <td><code class="pill">az-storage-tls:stnorthwindlogs</code></td>
+              </tr><tr class="finding-row" data-severity="LOW" data-asset="" data-text="no caa on fabrikam.io  caa:fabrikam.io dig caa fabrikam.io ">
+                <td><span class="badge badge-low">LOW</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>No CAA on fabrikam.io</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>dig CAA fabrikam.io</code></td>
+                <td><code class="pill">caa:fabrikam.io</code></td>
+              </tr><tr class="finding-row" data-severity="LOW" data-asset="" data-text="dnssec unsigned on fabrikam.io  dnssec:fabrikam.io dig dnskey fabrikam.io ">
+                <td><span class="badge badge-low">LOW</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>DNSSEC unsigned on fabrikam.io</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>dig DNSKEY fabrikam.io</code></td>
+                <td><code class="pill">dnssec:fabrikam.io</code></td>
+              </tr><tr class="finding-row" data-severity="LOW" data-asset="" data-text="conditional access policies in report-only mode  m365-ca-report-only policy ca003-legacyauthblock configured in report-only mode (not enforced) ">
+                <td><span class="badge badge-low">LOW</span></td>
+                <td><span class="muted">-</span></td>
+                <td><strong>Conditional Access policies in report-only mode</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>Policy CA003-LegacyAuthBlock configured in report-only mode (not enforced)</code></td>
+                <td><code class="pill">m365-ca-report-only</code></td>
+              </tr><tr class="finding-row" data-severity="INFO" data-asset="" data-text="mfa compliance at 91%  m365-mfa-compliance 242 of 266 total licensed users in contoso.com tenant have registered mfa authentication methods ">
                 <td><span class="badge badge-info">INFO</span></td>
+                <td><span class="muted">-</span></td>
                 <td><strong>MFA compliance at 91%</strong></td>
+                <td class="mono">-</td>
                 <td class="mono"><code>242 of 266 total licensed users in contoso.com tenant have registered MFA authentication methods</code></td>
                 <td><code class="pill">m365-mfa-compliance</code></td>
-              </tr><tr class="finding-row" data-severity="INFO" data-text="multi-cloud attack surface perimeter mapped perimeter:mapping 85 subdomains identified across 3 domains in aws, azure, gcp, and digitalocean">
+              </tr><tr class="finding-row" data-severity="INFO" data-asset="" data-text="multi-cloud attack surface perimeter mapped  perimeter:mapping 85 subdomains identified across 3 domains in aws, azure, gcp, and digitalocean ">
                 <td><span class="badge badge-info">INFO</span></td>
+                <td><span class="muted">-</span></td>
                 <td><strong>Multi-cloud attack surface perimeter mapped</strong></td>
+                <td class="mono">-</td>
                 <td class="mono"><code>85 subdomains identified across 3 domains in AWS, Azure, GCP, and DigitalOcean</code></td>
                 <td><code class="pill">perimeter:mapping</code></td>
               </tr>
             </tbody>
           </table>
           <div id="findings-no-results" class="empty-state" style="display: none;">No findings match your filter criteria.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================= -->
+  <!-- TAB: ASSET INVENTORY -->
+  <!-- ================================================================= -->
+  <section id="tab-assets" class="tab-content">
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Asset Inventory</span>
+        <span class="card-subtitle">Stable identifiers group tests, findings and CVEs per asset for risk review and forensics.</span>
+      </div>
+      <div class="card-body">
+        <div class="filter-bar">
+          <select class="search-input" id="asset-type-filter" style="max-width: 220px;">
+            <option value="ALL">All types (26)</option>
+            <option value="Asset">Asset</option><option value="Cloud host">Cloud host</option><option value="Domain / name">Domain / name</option><option value="Firewall">Firewall</option><option value="Kubernetes ingress">Kubernetes ingress</option><option value="Load balancer">Load balancer</option><option value="Mail server">Mail server</option><option value="Router">Router</option><option value="VPN gateway">VPN gateway</option><option value="Web service">Web service</option>
+          </select>
+          <input type="text" class="search-input" id="asset-search-input" placeholder="Search id, type, name, IP, product, port, finding, CVE...">
+        </div>
+        <div class="table-responsive">
+          <table id="assets-table">
+            <thead>
+              <tr>
+                <th style="width: 110px;">ID</th>
+                <th style="width: 120px;">Type</th>
+                <th>Asset</th>
+                <th>Product / Version</th>
+                <th>Open Ports</th>
+                <th>Findings</th>
+                <th>CVEs</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="asset-row" id="asset-CLOUD-002" data-type="Cloud host" data-text="cloud-002 cloud host pip-vm-erp-legacy 198.51.100.52 ms-wbt-server microsoft terminal services 3389/ms-wbt-server management / legacy service ms-wbt-server exposed remote desktop services rce cve-2024-38077 (cisa kev) cve-2024-38077"><td><code class="pill pill-critical">CLOUD-002</code></td><td><span class="badge badge-info">Cloud host</span></td><td><strong>pip-vm-erp-legacy</strong><br><span class="mono muted">198.51.100.52</span></td><td class="mono">ms-wbt-server Microsoft Terminal Services</td><td class="mono">3389/ms-wbt-server</td><td><span class="badge badge-critical" title="Management / legacy service ms-wbt-server exposed">Management / legacy service ms-wbt-server exposed</span> <span class="badge badge-critical" title="Remote Desktop Services RCE CVE-2024-38077 (CISA KEV)">Remote Desktop Services RCE CVE-2024-38077 (CISA KEV)</span> </td><td><span class="mono">CVE-2024-38077</span> <span class="badge badge-kev">KEV</span></td></tr><tr class="asset-row" id="asset-ROUTER-001" data-type="Router" data-text="router-001 router branch-gw45.northwind.net 203.0.113.45 winbox mikrotik routeros 6.48.6 8291/winbox end-of-life routeros 6.48.6 on branch office edge gateway cve-2023-32154"><td><code class="pill pill-critical">ROUTER-001</code></td><td><span class="badge badge-info">Router</span></td><td><strong>branch-gw45.northwind.net</strong><br><span class="mono muted">203.0.113.45</span></td><td class="mono">winbox MikroTik RouterOS 6.48.6</td><td class="mono">8291/winbox</td><td><span class="badge badge-critical" title="End-of-life RouterOS 6.48.6 on branch office edge gateway">End-of-life RouterOS 6.48.6 on branch office edge gateway</span> </td><td><span class="mono">CVE-2023-32154</span></td></tr><tr class="asset-row" id="asset-FW-001" data-type="Firewall" data-text="fw-001 firewall edge-fw01.contoso.com 198.51.100.90 http opnsense 23.7.1, lighttpd/1.4.69 443/http firewall / router admin gui on the internet cve-2023-43261"><td><code class="pill pill-high">FW-001</code></td><td><span class="badge badge-info">Firewall</span></td><td><strong>edge-fw01.contoso.com</strong><br><span class="mono muted">198.51.100.90</span></td><td class="mono">http OPNsense 23.7.1, lighttpd/1.4.69</td><td class="mono">443/http</td><td><span class="badge badge-high" title="Firewall / router admin GUI on the internet">Firewall / router admin GUI on the internet</span> </td><td><span class="mono">CVE-2023-43261</span></td></tr><tr class="asset-row" id="asset-WEB-001" data-type="Web service" data-text="web-001 web service ec2-legacy-app.aws.com 203.0.113.19 http apache httpd 2.4.49 80/http apache 2.4.49 path traversal &amp; rce cve-2021-41773 (cisa kev) cve-2021-41773"><td><code class="pill pill-high">WEB-001</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>ec2-legacy-app.aws.com</strong><br><span class="mono muted">203.0.113.19</span></td><td class="mono">http Apache httpd 2.4.49</td><td class="mono">80/http</td><td><span class="badge badge-high" title="Apache 2.4.49 Path Traversal &amp; RCE CVE-2021-41773 (CISA KEV)">Apache 2.4.49 Path Traversal &amp; RCE CVE-2021-41773 (CISA KEV)</span> </td><td><span class="mono">CVE-2021-41773</span> <span class="badge badge-kev">KEV</span></td></tr><tr class="asset-row" id="asset-WEB-002" data-type="Web service" data-text="web-002 web service api-staging.northwindtraders.com api-staging.northwindtraders.com apache/2.4.49 - exposed openapi / swagger specification "><td><code class="pill pill-high">WEB-002</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>api-staging.northwindtraders.com</strong><br><span class="mono muted">api-staging.northwindtraders.com</span></td><td class="mono">Apache/2.4.49</td><td class="mono">-</td><td><span class="badge badge-high" title="Exposed OpenAPI / Swagger specification">Exposed OpenAPI / Swagger specification</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-004" data-type="Web service" data-text="web-004 web service dev-portal.fabrikam.io dev-portal.fabrikam.io nginx/1.22.1 - exposed environment configuration (.env) "><td><code class="pill pill-high">WEB-004</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>dev-portal.fabrikam.io</strong><br><span class="mono muted">dev-portal.fabrikam.io</span></td><td class="mono">nginx/1.22.1</td><td class="mono">-</td><td><span class="badge badge-high" title="Exposed environment configuration (.env)">Exposed environment configuration (.env)</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-006" data-type="Web service" data-text="web-006 web service files.northwindtraders.com files.northwindtraders.com apache/2.4.52 - unauthenticated directory listing "><td><code class="pill pill-high">WEB-006</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>files.northwindtraders.com</strong><br><span class="mono muted">files.northwindtraders.com</span></td><td class="mono">Apache/2.4.52</td><td class="mono">-</td><td><span class="badge badge-high" title="Unauthenticated directory listing">Unauthenticated directory listing</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-ASSET-001" data-type="Asset" data-text="asset-001 asset droplet-untracked-77.do.net 192.0.2.77 - - fabrikam.io apex resolves to infrastructure not in our inventory "><td><code class="pill pill-medium">ASSET-001</code></td><td><span class="badge badge-info">Asset</span></td><td><strong>droplet-untracked-77.do.net</strong><br><span class="mono muted">192.0.2.77</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="badge badge-medium" title="fabrikam.io apex resolves to infrastructure not in our inventory">fabrikam.io apex resolves to infrastructure not in our inventory</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-ASSET-002" data-type="Asset" data-text="asset-002 asset 0.0.0.0 0.0.0.0 - - gcp firewall allows tcp:22 from internet "><td><code class="pill pill-medium">ASSET-002</code></td><td><span class="badge badge-info">Asset</span></td><td><strong>0.0.0.0</strong><br><span class="mono muted">0.0.0.0</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="badge badge-medium" title="GCP firewall allows tcp:22 from Internet">GCP firewall allows tcp:22 from Internet</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-DOMAIN-001" data-type="Domain / name" data-text="domain-001 domain / name ci.contoso.com ci.contoso.com - - webhook without ssl verification "><td><code class="pill pill-medium">DOMAIN-001</code></td><td><span class="badge badge-info">Domain / name</span></td><td><strong>ci.contoso.com</strong><br><span class="mono muted">ci.contoso.com</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="badge badge-medium" title="Webhook without SSL verification">Webhook without SSL verification</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-K8S-003" data-type="Kubernetes ingress" data-text="k8s-003 kubernetes ingress pip-shop-frontend-lb 203.0.113.88 http nginx 1.20.1, nginx/1.20.1 443/http expired tls certificate cve-2021-23017"><td><code class="pill pill-medium">K8S-003</code></td><td><span class="badge badge-info">Kubernetes ingress</span></td><td><strong>pip-shop-frontend-lb</strong><br><span class="mono muted">203.0.113.88</span></td><td class="mono">http nginx 1.20.1, nginx/1.20.1</td><td class="mono">443/http</td><td><span class="badge badge-medium" title="Expired TLS certificate">Expired TLS certificate</span> </td><td><span class="mono">CVE-2021-23017</span></td></tr><tr class="asset-row" id="asset-VPN-001" data-type="VPN gateway" data-text="vpn-001 vpn gateway pip-contoso-vpn-gw 198.51.100.15 - - internal-named host publicly resolvable "><td><code class="pill pill-medium">VPN-001</code></td><td><span class="badge badge-info">VPN gateway</span></td><td><strong>pip-contoso-vpn-gw</strong><br><span class="mono muted">198.51.100.15</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="badge badge-medium" title="Internal-named host publicly resolvable">Internal-named host publicly resolvable</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-010" data-type="Web service" data-text="web-010 web service www.contoso.com www.contoso.com microsoft-iis/10.0 - public website missing security headers "><td><code class="pill pill-low">WEB-010</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>www.contoso.com</strong><br><span class="mono muted">www.contoso.com</span></td><td class="mono">Microsoft-IIS/10.0</td><td class="mono">-</td><td><span class="badge badge-low" title="Public website missing security headers">Public website missing security headers</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-CLOUD-001" data-type="Cloud host" data-text="cloud-001 cloud host pip-contoso-apim-prod 198.51.100.102 - -  "><td><code class="pill pill-info">CLOUD-001</code></td><td><span class="badge badge-info">Cloud host</span></td><td><strong>pip-contoso-apim-prod</strong><br><span class="mono muted">198.51.100.102</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-CLOUD-003" data-type="Cloud host" data-text="cloud-003 cloud host pip-dataflow-worker 203.0.113.140 - -  "><td><code class="pill pill-info">CLOUD-003</code></td><td><span class="badge badge-info">Cloud host</span></td><td><strong>pip-dataflow-worker</strong><br><span class="mono muted">203.0.113.140</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-CLOUD-004" data-type="Cloud host" data-text="cloud-004 cloud host pip-analytics-bastion 203.0.113.92 - -  "><td><code class="pill pill-info">CLOUD-004</code></td><td><span class="badge badge-info">Cloud host</span></td><td><strong>pip-analytics-bastion</strong><br><span class="mono muted">203.0.113.92</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-K8S-001" data-type="Kubernetes ingress" data-text="k8s-001 kubernetes ingress pip-contoso-aks-ingress 198.51.100.75 - -  "><td><code class="pill pill-info">K8S-001</code></td><td><span class="badge badge-info">Kubernetes ingress</span></td><td><strong>pip-contoso-aks-ingress</strong><br><span class="mono muted">198.51.100.75</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-K8S-002" data-type="Kubernetes ingress" data-text="k8s-002 kubernetes ingress pip-gke-ingress-cl1 203.0.113.115 - -  "><td><code class="pill pill-info">K8S-002</code></td><td><span class="badge badge-info">Kubernetes ingress</span></td><td><strong>pip-gke-ingress-cl1</strong><br><span class="mono muted">203.0.113.115</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-LB-001" data-type="Load balancer" data-text="lb-001 load balancer pip-contoso-erp-prod-01 198.51.100.10 http openssl 1.1.1k 443/http  cve-2022-0778"><td><code class="pill pill-info">LB-001</code></td><td><span class="badge badge-info">Load balancer</span></td><td><strong>pip-contoso-erp-prod-01</strong><br><span class="mono muted">198.51.100.10</span></td><td class="mono">http OpenSSL 1.1.1k</td><td class="mono">443/http</td><td><span class="muted">none</span></td><td><span class="mono">CVE-2022-0778</span></td></tr><tr class="asset-row" id="asset-MAIL-001" data-type="Mail server" data-text="mail-001 mail server pip-contoso-mail-relay 198.51.100.12 - -  "><td><code class="pill pill-info">MAIL-001</code></td><td><span class="badge badge-info">Mail server</span></td><td><strong>pip-contoso-mail-relay</strong><br><span class="mono muted">198.51.100.12</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-003" data-type="Web service" data-text="web-003 web service api.northwindtraders.com api.northwindtraders.com envoy/1.28.0 -  "><td><code class="pill pill-info">WEB-003</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>api.northwindtraders.com</strong><br><span class="mono muted">api.northwindtraders.com</span></td><td class="mono">envoy/1.28.0</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-005" data-type="Web service" data-text="web-005 web service erp.contoso.com erp.contoso.com microsoft-iis/10.0 -  "><td><code class="pill pill-info">WEB-005</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>erp.contoso.com</strong><br><span class="mono muted">erp.contoso.com</span></td><td class="mono">Microsoft-IIS/10.0</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-007" data-type="Web service" data-text="web-007 web service portal.contoso.com portal.contoso.com nginx/1.24.0 -  "><td><code class="pill pill-info">WEB-007</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>portal.contoso.com</strong><br><span class="mono muted">portal.contoso.com</span></td><td class="mono">nginx/1.24.0</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-008" data-type="Web service" data-text="web-008 web service remote.contoso.com remote.contoso.com microsoft-httpapi/2.0 -  "><td><code class="pill pill-info">WEB-008</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>remote.contoso.com</strong><br><span class="mono muted">remote.contoso.com</span></td><td class="mono">Microsoft-HTTPAPI/2.0</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-009" data-type="Web service" data-text="web-009 web service shop.northwindtraders.com shop.northwindtraders.com cloudflare -  "><td><code class="pill pill-info">WEB-009</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>shop.northwindtraders.com</strong><br><span class="mono muted">shop.northwindtraders.com</span></td><td class="mono">Cloudflare</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-011" data-type="Web service" data-text="web-011 web service www.fabrikam.io www.fabrikam.io nginx/1.26.1 -  "><td><code class="pill pill-info">WEB-011</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>www.fabrikam.io</strong><br><span class="mono muted">www.fabrikam.io</span></td><td class="mono">nginx/1.26.1</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr>
+            </tbody>
+          </table>
+          <div id="assets-no-results" class="empty-state" style="display: none;">No assets match your filter criteria.</div>
         </div>
       </div>
     </div>
@@ -1070,7 +1216,11 @@
   <!-- TAB 4: WEB & ENTRY POINTS -->
   <!-- ================================================================= -->
   <section id="tab-web" class="tab-content">
-    
+
+    <div class="filter-bar">
+      <input type="text" class="search-input" id="web-search-input" placeholder="Filter web tables: path, URL, parameter, host...">
+    </div>
+
     <div class="grid-2">
       <!-- Exposed Paths -->
       <div class="card">
@@ -1321,7 +1471,11 @@
   <!-- TAB 5: CLOUD & DNS POSTURE -->
   <!-- ================================================================= -->
   <section id="tab-cloud" class="tab-content">
-    
+
+    <div class="filter-bar">
+      <input type="text" class="search-input" id="cloud-search-input" placeholder="Filter cloud/DNS tables: IP, resource, rule, domain...">
+    </div>
+
     <!-- DNS & Mail Posture -->
     <div class="card">
       <div class="card-header">
@@ -1960,8 +2114,8 @@ auth.fabrikam.io">
               <div class="terminal-right">
                 <span class="badge badge-auth">exit 0</span>
                 <span class='badge badge-info'>3.4s</span>
-                <button class="btn-terminal" onclick="copySnippet(this, "subfinder -d contoso.com -d northwindtraders.com -d fabrikam.io -all -silent")">Copy Command</button>
-                <button class="btn-terminal" onclick="copySnippet(this, "www.contoso.com\nmail.contoso.com\nautodiscover.contoso.com\nvpn.contoso.com\nvpn-internal.contoso.com\nportal.contoso.com\nerp.contoso.com\nremote.contoso.com\napi.contoso.com\nedge-gw.contoso.com\nshop.northwindtraders.com\napi.northwindtraders.com\napi-staging.northwindtraders.com\nfiles.northwindtraders.com\norders.northwindtraders.com\npartner.northwindtraders.com\ndev-portal.fabrikam.io\napi.fabrikam.io\nauth.fabrikam.io")">Copy Output</button>
+                <button class="btn-terminal" onclick="copyTerminalCmd(this)">Copy Command</button>
+                <button class="btn-terminal" onclick="copyTerminalOut(this)">Copy Output</button>
               </div>
             </div>
             <div class="terminal-body">
@@ -2012,8 +2166,8 @@ dev-portal.fabrikam.io [192.0.2.77]">
               <div class="terminal-right">
                 <span class="badge badge-auth">exit 0</span>
                 <span class='badge badge-info'>1.3s</span>
-                <button class="btn-terminal" onclick="copySnippet(this, "dnsx -l osint/subdomains.txt -resp -silent")">Copy Command</button>
-                <button class="btn-terminal" onclick="copySnippet(this, "www.contoso.com [13.107.246.10]\nmail.contoso.com [198.51.100.12]\nvpn.contoso.com [198.51.100.15]\nvpn-internal.contoso.com [198.51.100.15]\nerp.contoso.com [198.51.100.10]\nremote.contoso.com [198.51.100.52]\nedge-gw.contoso.com [203.0.113.45]\nshop.northwindtraders.com [203.0.113.88]\napi-staging.northwindtraders.com [203.0.113.19]\nfiles.northwindtraders.com [198.51.100.90]\ndev-portal.fabrikam.io [192.0.2.77]")">Copy Output</button>
+                <button class="btn-terminal" onclick="copyTerminalCmd(this)">Copy Command</button>
+                <button class="btn-terminal" onclick="copyTerminalOut(this)">Copy Output</button>
               </div>
             </div>
             <div class="terminal-body">
@@ -2046,8 +2200,8 @@ dev-portal.fabrikam.io [192.0.2.77]</div>
               <div class="terminal-right">
                 <span class="badge badge-auth">exit 0</span>
                 <span class='badge badge-info'>45ms</span>
-                <button class="btn-terminal" onclick="copySnippet(this, "dig +noall +answer TXT _dmarc.fabrikam.io")">Copy Command</button>
-                <button class="btn-terminal" onclick="copySnippet(this, "_dmarc.fabrikam.io.    300    IN    TXT    \"v=DMARC1; p=none; rua=mailto:dmarc@fabrikam.io;\"")">Copy Output</button>
+                <button class="btn-terminal" onclick="copyTerminalCmd(this)">Copy Command</button>
+                <button class="btn-terminal" onclick="copyTerminalOut(this)">Copy Output</button>
               </div>
             </div>
             <div class="terminal-body">
@@ -2078,8 +2232,8 @@ https://203.0.113.88:443 [502] [502 bad gateway] [nginx/1.20.1]">
               <div class="terminal-right">
                 <span class="badge badge-auth">exit 0</span>
                 <span class='badge badge-info'>4.8s</span>
-                <button class="btn-terminal" onclick="copySnippet(this, "httpx -l osint/subdomains.txt -title -tech-detect -status-code -follow-redirects")">Copy Command</button>
-                <button class="btn-terminal" onclick="copySnippet(this, "https://www.contoso.com [200] [Contoso Enterprise Global] [Microsoft-IIS/10.0]\nhttps://portal.contoso.com [200] [Contoso Identity & Cloud Portal] [nginx/1.24.0] -> https://auth.contoso.com/oauth2\nhttps://remote.contoso.com [200] [Contoso RDS Web Gateway] [Microsoft-HTTPAPI/2.0]\nhttps://shop.northwindtraders.com [200] [Northwind Global B2B Marketplace] [Cloudflare,PHP/8.2]\nhttps://api-staging.northwindtraders.com [200] [Swagger UI - Staging API] [Apache/2.4.49]\nhttps://files.northwindtraders.com [200] [Index of /] [Apache/2.4.52]\nhttps://dev-portal.fabrikam.io [200] [Fabrikam Developer Sandbox] [nginx/1.22.1,Node.js]\nhttps://198.51.100.90:443 [200] [Login | OPNsense] [lighttpd/1.4.69]\nhttps://203.0.113.88:443 [502] [502 Bad Gateway] [nginx/1.20.1]")">Copy Output</button>
+                <button class="btn-terminal" onclick="copyTerminalCmd(this)">Copy Command</button>
+                <button class="btn-terminal" onclick="copyTerminalOut(this)">Copy Output</button>
               </div>
             </div>
             <div class="terminal-body">
@@ -2120,8 +2274,8 @@ nmap done: 1 ip address (1 host up) scanned in 3.12 seconds">
               <div class="terminal-right">
                 <span class="badge badge-auth">exit 0</span>
                 <span class='badge badge-info'>3.1s</span>
-                <button class="btn-terminal" onclick="copySnippet(this, "nmap -sT -Pn -p 21,22,80,443,3389,8291 --max-rate 400 -sV --version-all 198.51.100.52")">Copy Command</button>
-                <button class="btn-terminal" onclick="copySnippet(this, "Starting Nmap 7.95 ( https://nmap.org ) at 2026-11-03 10:14 UTC\nNmap scan report for remote.contoso.com (198.51.100.52)\nHost is up (0.024s latency).\n\nPORT     STATE SERVICE       VERSION\n80/tcp   open  http          Microsoft IIS httpd 10.0\n443/tcp  open  ssl/http      Microsoft HTTPAPI httpd 2.0 (SSDP/UPnP)\n3389/tcp open  ms-wbt-server Microsoft Terminal Services (RDP enabled)\nService Info: OS: Windows; CPE: cpe:/o:microsoft:windows\n\nNmap done: 1 IP address (1 host up) scanned in 3.12 seconds")">Copy Output</button>
+                <button class="btn-terminal" onclick="copyTerminalCmd(this)">Copy Command</button>
+                <button class="btn-terminal" onclick="copyTerminalOut(this)">Copy Output</button>
               </div>
             </div>
             <div class="terminal-body">
@@ -2165,8 +2319,8 @@ nmap done: 1 ip address (1 host up) scanned in 8.45 seconds">
               <div class="terminal-right">
                 <span class="badge badge-auth">exit 0</span>
                 <span class='badge badge-info'>8.4s</span>
-                <button class="btn-terminal" onclick="copySnippet(this, "nmap -sT -Pn -p 21,22,23,53,80,443,8291 --max-rate 40 -sV 203.0.113.45")">Copy Command</button>
-                <button class="btn-terminal" onclick="copySnippet(this, "Starting Nmap 7.95 ( https://nmap.org ) at 2026-11-03 10:18 UTC\nNmap scan report for edge-gw.contoso.com (203.0.113.45)\nHost is up (0.041s latency).\n\nPORT     STATE SERVICE VERSION\n22/tcp   open  ssh     MikroTik RouterOS sshd (protocol 2.0)\n80/tcp   open  http    MikroTik RouterOS httpd\n443/tcp  open  ssl/ssl MikroTik RouterOS httpd\n8291/tcp open  winbox  MikroTik RouterOS 6.48.6 winbox\nService Info: OS: RouterOS; Device: router; CPE: cpe:/o:mikrotik:routeros:6.48.6\n\nNmap done: 1 IP address (1 host up) scanned in 8.45 seconds")">Copy Output</button>
+                <button class="btn-terminal" onclick="copyTerminalCmd(this)">Copy Command</button>
+                <button class="btn-terminal" onclick="copyTerminalOut(this)">Copy Output</button>
               </div>
             </div>
             <div class="terminal-body">
@@ -2206,8 +2360,8 @@ Nmap done: 1 IP address (1 host up) scanned in 8.45 seconds</div>
               <div class="terminal-right">
                 <span class="badge badge-auth">exit 0</span>
                 <span class='badge badge-info'>1.6s</span>
-                <button class="btn-terminal" onclick="copySnippet(this, "curl -s \"https://web.archive.org/cdx/search/cdx?url=*.northwindtraders.com/*&output=json&fl=original&collapse=urlkey\"")">Copy Command</button>
-                <button class="btn-terminal" onclick="copySnippet(this, "[[\"original\"],\n[\"https://api.northwindtraders.com/v1/customers?account_id=9821\"],\n[\"https://shop.northwindtraders.com/catalog/search?sort=price_desc&filter=active\"],\n[\"https://files.northwindtraders.com/download?file=reports/2026-Q3.pdf\"],\n[\"https://api-staging.northwindtraders.com/health?debug=1&trace=true\"],\n[\"https://files.northwindtraders.com/exports/payroll_2026.csv\"],\n[\"https://shop.northwindtraders.com/backup/database_dump.sql.gz\"]]")">Copy Output</button>
+                <button class="btn-terminal" onclick="copyTerminalCmd(this)">Copy Command</button>
+                <button class="btn-terminal" onclick="copyTerminalOut(this)">Copy Output</button>
               </div>
             </div>
             <div class="terminal-body">
@@ -2250,8 +2404,8 @@ ports:
               <div class="terminal-right">
                 <span class="badge badge-auth">exit 0</span>
                 <span class='badge badge-info'>2.1s</span>
-                <button class="btn-terminal" onclick="copySnippet(this, "shodan host 198.51.100.52")">Copy Command</button>
-                <button class="btn-terminal" onclick="copySnippet(this, "198.51.100.52\nHostnames:               remote.contoso.com, vm-erp-legacy.contoso.com\nCity:                    Amsterdam\nCountry:                 Netherlands\nOrganization:            Microsoft Azure\nOperating System:        Windows Server 2019 Datacenter\nLast Update:             2026-11-01T14:22:18.491201\n\nPorts:\n  80/tcp   http\n  443/tcp  https\n  3389/tcp ms-wbt-server\n    |-- Vulnerabilities:\n    |   CVE-2024-38077 (CVSS 9.8) - Windows Remote Desktop Licensing Service RCE [CISA KEV]\n    |   CVE-2019-0708  (CVSS 9.8) - BlueKeep Remote Desktop Services RCE")">Copy Output</button>
+                <button class="btn-terminal" onclick="copyTerminalCmd(this)">Copy Command</button>
+                <button class="btn-terminal" onclick="copyTerminalOut(this)">Copy Output</button>
               </div>
             </div>
             <div class="terminal-body">
@@ -2291,8 +2445,8 @@ Ports:
               <div class="terminal-right">
                 <span class="badge badge-auth">exit 0</span>
                 <span class='badge badge-info'>14.2s</span>
-                <button class="btn-terminal" onclick="copySnippet(this, "nuclei -l web/httpx_all.txt -t cves/ -t exposures/ -severity critical,high,medium -silent")">Copy Command</button>
-                <button class="btn-terminal" onclick="copySnippet(this, "[cve-2021-41773] [http] [high] https://api-staging.northwindtraders.com/icons/.%%32%65/.%%32%65/etc/passwd\n[env-file-disclosure] [http] [high] https://dev-portal.fabrikam.io/.env\n[swagger-api-docs] [http] [medium] https://api-staging.northwindtraders.com/v2/api-docs\n[opnsense-admin-panel] [http] [high] https://198.51.100.90:443/")">Copy Output</button>
+                <button class="btn-terminal" onclick="copyTerminalCmd(this)">Copy Command</button>
+                <button class="btn-terminal" onclick="copyTerminalOut(this)">Copy Output</button>
               </div>
             </div>
             <div class="terminal-body">
@@ -2328,8 +2482,8 @@ Ports:
               <div class="terminal-right">
                 <span class="badge badge-auth">exit 0</span>
                 <span class='badge badge-info'>780ms</span>
-                <button class="btn-terminal" onclick="copySnippet(this, "curl -s -H 'hibp-api-key: [REDACTED]' 'https://haveibeenpwned.com/api/v3/breaches?domain=contoso.com'")">Copy Command</button>
-                <button class="btn-terminal" onclick="copySnippet(this, "[\n  {\n    \"Name\": \"ContosoMarketing2023\",\n    \"Title\": \"Contoso Marketing Portal Leak\",\n    \"Domain\": \"contoso.com\",\n    \"BreachDate\": \"2023-04-18\",\n    \"PwnCount\": 18400,\n    \"DataClasses\": [\"Email addresses\", \"Passwords\", \"Job titles\"],\n    \"IsVerified\": true\n  }\n]")">Copy Output</button>
+                <button class="btn-terminal" onclick="copyTerminalCmd(this)">Copy Command</button>
+                <button class="btn-terminal" onclick="copyTerminalOut(this)">Copy Output</button>
               </div>
             </div>
             <div class="terminal-body">
@@ -2368,8 +2522,8 @@ Ports:
               <div class="terminal-right">
                 <span class="badge badge-auth">exit 0</span>
                 <span class='badge badge-info'>1.9s</span>
-                <button class="btn-terminal" onclick="copySnippet(this, "az graph query -q \"Resources | where type =~ 'Microsoft.Network/publicIPAddresses' | project properties.ipAddress, name, resourceGroup\"")">Copy Command</button>
-                <button class="btn-terminal" onclick="copySnippet(this, "[\n  {\"name\": \"pip-contoso-erp-prod-01\", \"properties_ipAddress\": \"198.51.100.10\", \"resourceGroup\": \"rg-contoso-erp-prod\"},\n  {\"name\": \"pip-contoso-vpn-gw\", \"properties_ipAddress\": \"198.51.100.15\", \"resourceGroup\": \"rg-contoso-network\"},\n  {\"name\": \"pip-vm-erp-legacy\", \"properties_ipAddress\": \"198.51.100.52\", \"resourceGroup\": \"rg-contoso-erp-prod\"},\n  {\"name\": \"pip-contoso-aks-ingress\", \"properties_ipAddress\": \"198.51.100.75\", \"resourceGroup\": \"rg-contoso-cloudapps\"},\n  {\"name\": \"pip-contoso-apim-prod\", \"properties_ipAddress\": \"198.51.100.102\", \"resourceGroup\": \"rg-contoso-integration\"}\n]")">Copy Output</button>
+                <button class="btn-terminal" onclick="copyTerminalCmd(this)">Copy Command</button>
+                <button class="btn-terminal" onclick="copyTerminalOut(this)">Copy Output</button>
               </div>
             </div>
             <div class="terminal-body">
@@ -2403,8 +2557,8 @@ Ports:
               <div class="terminal-right">
                 <span class="badge badge-auth">exit 0</span>
                 <span class='badge badge-info'>1.4s</span>
-                <button class="btn-terminal" onclick="copySnippet(this, "az graph query --first 1000 -o json -q \"Resources | where type =~ 'microsoft.storage/storageaccounts' | project name, resourceGroup, allowBlobPublicAccess=properties.allowBlobPublicAccess, supportsHttpsTrafficOnly=properties.supportsHttpsTrafficOnly, minimumTlsVersion=properties.minimumTlsVersion\"")">Copy Command</button>
-                <button class="btn-terminal" onclick="copySnippet(this, "[\n  {\"name\": \"stcontosoexports\", \"resourceGroup\": \"rg-contoso-storage\", \"allowBlobPublicAccess\": true, \"supportsHttpsTrafficOnly\": true, \"minimumTlsVersion\": \"TLS1_2\"},\n  {\"name\": \"stnorthwindlogs\", \"resourceGroup\": \"rg-northwind-data\", \"allowBlobPublicAccess\": false, \"supportsHttpsTrafficOnly\": false, \"minimumTlsVersion\": \"TLS1_0\"},\n  {\"name\": \"stcontosobackups\", \"resourceGroup\": \"rg-contoso-storage\", \"allowBlobPublicAccess\": false, \"supportsHttpsTrafficOnly\": true, \"minimumTlsVersion\": \"TLS1_1\"},\n  {\"name\": \"stcontosowebstatic\", \"resourceGroup\": \"rg-contoso-cloudapps\", \"allowBlobPublicAccess\": false, \"supportsHttpsTrafficOnly\": true, \"minimumTlsVersion\": \"TLS1_2\"}\n]")">Copy Output</button>
+                <button class="btn-terminal" onclick="copyTerminalCmd(this)">Copy Command</button>
+                <button class="btn-terminal" onclick="copyTerminalOut(this)">Copy Output</button>
               </div>
             </div>
             <div class="terminal-body">
@@ -2436,8 +2590,8 @@ Ports:
               <div class="terminal-right">
                 <span class="badge badge-auth">exit 0</span>
                 <span class='badge badge-info'>1.2s</span>
-                <button class="btn-terminal" onclick="copySnippet(this, "az graph query --first 1000 -o json -q \"Resources | where type =~ 'microsoft.keyvault/vaults' | project name, resourceGroup, enablePurgeProtection=properties.enablePurgeProtection\"")">Copy Command</button>
-                <button class="btn-terminal" onclick="copySnippet(this, "[\n  {\"name\": \"kv-contoso-prod\", \"resourceGroup\": \"rg-contoso-security\", \"enablePurgeProtection\": false},\n  {\"name\": \"kv-northwind-dev\", \"resourceGroup\": \"rg-northwind-security\", \"enablePurgeProtection\": false},\n  {\"name\": \"kv-contoso-infra\", \"resourceGroup\": \"rg-contoso-network\", \"enablePurgeProtection\": true}\n]")">Copy Output</button>
+                <button class="btn-terminal" onclick="copyTerminalCmd(this)">Copy Command</button>
+                <button class="btn-terminal" onclick="copyTerminalOut(this)">Copy Output</button>
               </div>
             </div>
             <div class="terminal-body">
@@ -2467,8 +2621,8 @@ Ports:
               <div class="terminal-right">
                 <span class="badge badge-auth">exit 0</span>
                 <span class='badge badge-info'>1.3s</span>
-                <button class="btn-terminal" onclick="copySnippet(this, "az graph query --first 1000 -o json -q \"Resources | where type =~ 'microsoft.sql/servers' | project name, resourceGroup, publicNetworkAccess=properties.publicNetworkAccess\"")">Copy Command</button>
-                <button class="btn-terminal" onclick="copySnippet(this, "[\n  {\"name\": \"sql-contoso-erp\", \"resourceGroup\": \"rg-contoso-erp-prod\", \"publicNetworkAccess\": \"Enabled\"},\n  {\"name\": \"sql-northwind-dw\", \"resourceGroup\": \"rg-northwind-analytics\", \"publicNetworkAccess\": \"Disabled\"}\n]")">Copy Output</button>
+                <button class="btn-terminal" onclick="copyTerminalCmd(this)">Copy Command</button>
+                <button class="btn-terminal" onclick="copyTerminalOut(this)">Copy Output</button>
               </div>
             </div>
             <div class="terminal-body">
@@ -2500,8 +2654,8 @@ Ports:
               <div class="terminal-right">
                 <span class="badge badge-auth">exit 0</span>
                 <span class='badge badge-info'>1.6s</span>
-                <button class="btn-terminal" onclick="copySnippet(this, "az security pricing list -o json")">Copy Command</button>
-                <button class="btn-terminal" onclick="copySnippet(this, "[\n  {\"id\": \"/subscriptions/sub-contoso-prod/providers/Microsoft.Security/pricings/VirtualMachines\", \"name\": \"VirtualMachines\", \"pricingTier\": \"Free\"},\n  {\"id\": \"/subscriptions/sub-contoso-prod/providers/Microsoft.Security/pricings/StorageAccounts\", \"name\": \"StorageAccounts\", \"pricingTier\": \"Free\"},\n  {\"id\": \"/subscriptions/sub-contoso-prod/providers/Microsoft.Security/pricings/SqlServers\", \"name\": \"SqlServers\", \"pricingTier\": \"Free\"},\n  {\"id\": \"/subscriptions/sub-contoso-prod/providers/Microsoft.Security/pricings/AppServices\", \"name\": \"AppServices\", \"pricingTier\": \"Standard\"},\n  {\"id\": \"/subscriptions/sub-contoso-prod/providers/Microsoft.Security/pricings/KeyVaults\", \"name\": \"KeyVaults\", \"pricingTier\": \"Standard\"}\n]")">Copy Output</button>
+                <button class="btn-terminal" onclick="copyTerminalCmd(this)">Copy Command</button>
+                <button class="btn-terminal" onclick="copyTerminalOut(this)">Copy Output</button>
               </div>
             </div>
             <div class="terminal-body">
@@ -2534,8 +2688,8 @@ allow-staging-debug  vpc-analytics-prod    0.0.0.0/0                     tcp:808
               <div class="terminal-right">
                 <span class="badge badge-auth">exit 0</span>
                 <span class='badge badge-info'>2.3s</span>
-                <button class="btn-terminal" onclick="copySnippet(this, "gcloud compute firewall-rules list --filter=\"direction=INGRESS AND disabled=false\" --format=\"table(name,network,sourceRanges.list():label=SRC,allowed[].map().firewall_rule().list():label=ALLOW)\"")">Copy Command</button>
-                <button class="btn-terminal" onclick="copySnippet(this, "NAME                 NETWORK               SRC                           ALLOW\nallow-ssh-legacy     vpc-analytics-prod    0.0.0.0/0                     tcp:22\nallow-web-traffic    vpc-ecommerce-prod    0.0.0.0/0                     tcp:80,tcp:443\nallow-health-checks  vpc-ecommerce-prod    130.211.0.0/22,35.191.0.0/16  tcp:80,tcp:443\nallow-staging-debug  vpc-analytics-prod    0.0.0.0/0                     tcp:8080,tcp:9090")">Copy Output</button>
+                <button class="btn-terminal" onclick="copyTerminalCmd(this)">Copy Command</button>
+                <button class="btn-terminal" onclick="copyTerminalOut(this)">Copy Output</button>
               </div>
             </div>
             <div class="terminal-body">
@@ -2584,8 +2738,8 @@ allow-staging-debug  vpc-analytics-prod    0.0.0.0/0                     tcp:808
               <div class="terminal-right">
                 <span class="badge badge-auth">exit 0</span>
                 <span class='badge badge-info'>780ms</span>
-                <button class="btn-terminal" onclick="copySnippet(this, "GET https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies")">Copy Command</button>
-                <button class="btn-terminal" onclick="copySnippet(this, "{\n  \"@odata.context\": \"https://graph.microsoft.com/v1.0/$metadata#identity/conditionalAccess/policies\",\n  \"value\": [\n    {\n      \"id\": \"c7a8291f-0e12-4c91-b328-984210a12001\",\n      \"displayName\": \"CA001-RequireMFA-Admins\",\n      \"state\": \"enabled\",\n      \"conditions\": { \"users\": { \"includeRoles\": [\"62e90394-69f5-4237-9190-012177145e10\"] } }\n    },\n    {\n      \"id\": \"d9b9302a-1f23-5d02-c439-095321b23112\",\n      \"displayName\": \"CA002-BlockLegacyAuth\",\n      \"state\": \"enabled\",\n      \"conditions\": { \"clientAppTypes\": [\"exchangeActiveSync\", \"other\"] }\n    },\n    {\n      \"id\": \"e0ca413b-2a34-6e13-d540-106432c34223\",\n      \"displayName\": \"CA003-LegacyAuthBlock\",\n      \"state\": \"enabledForReportingButNotEnforced\",\n      \"conditions\": { \"users\": { \"includeUsers\": [\"All\"] } }\n    }\n  ]\n}")">Copy Output</button>
+                <button class="btn-terminal" onclick="copyTerminalCmd(this)">Copy Command</button>
+                <button class="btn-terminal" onclick="copyTerminalOut(this)">Copy Output</button>
               </div>
             </div>
             <div class="terminal-body">
@@ -2634,8 +2788,8 @@ allow-staging-debug  vpc-analytics-prod    0.0.0.0/0                     tcp:808
               <div class="terminal-right">
                 <span class="badge badge-auth">exit 0</span>
                 <span class='badge badge-info'>520ms</span>
-                <button class="btn-terminal" onclick="copySnippet(this, "gh api /orgs/contoso/members?filter=2fa_disabled")">Copy Command</button>
-                <button class="btn-terminal" onclick="copySnippet(this, "[\n  {\"login\": \"contractor-dev1\", \"id\": 1048291, \"site_admin\": false},\n  {\"login\": \"external-qa-lead\", \"id\": 2049182, \"site_admin\": false},\n  {\"login\": \"svc-build-contoso\", \"id\": 3058291, \"site_admin\": false}\n]")">Copy Output</button>
+                <button class="btn-terminal" onclick="copyTerminalCmd(this)">Copy Command</button>
+                <button class="btn-terminal" onclick="copyTerminalOut(this)">Copy Output</button>
               </div>
             </div>
             <div class="terminal-body">
@@ -2677,8 +2831,8 @@ allow-staging-debug  vpc-analytics-prod    0.0.0.0/0                     tcp:808
               <div class="terminal-right">
                 <span class="badge badge-auth">exit 0</span>
                 <span class='badge badge-info'>610ms</span>
-                <button class="btn-terminal" onclick="copySnippet(this, "gh api /orgs/contoso/secret-scanning/alerts?state=open")">Copy Command</button>
-                <button class="btn-terminal" onclick="copySnippet(this, "[\n  {\n    \"number\": 14,\n    \"secret_type\": \"azure_storage_account_key\",\n    \"secret_type_display_name\": \"Azure Storage Account Key\",\n    \"state\": \"open\",\n    \"html_url\": \"https://github.com/contoso-org/contoso-api/security/secret-scanning/14\"\n  },\n  {\n    \"number\": 18,\n    \"secret_type\": \"github_personal_access_token\",\n    \"secret_type_display_name\": \"GitHub Personal Access Token\",\n    \"state\": \"open\",\n    \"html_url\": \"https://github.com/contoso-org/contoso-api/security/secret-scanning/18\"\n  }\n]")">Copy Output</button>
+                <button class="btn-terminal" onclick="copyTerminalCmd(this)">Copy Command</button>
+                <button class="btn-terminal" onclick="copyTerminalOut(this)">Copy Output</button>
               </div>
             </div>
             <div class="terminal-body">
@@ -2714,15 +2868,13 @@ allow-staging-debug  vpc-analytics-prod    0.0.0.0/0                     tcp:808
   const navTabs = document.querySelectorAll('.nav-tab');
   const tabContents = document.querySelectorAll('.tab-content');
 
+  function activateTab(targetId) {
+    navTabs.forEach(t => t.classList.toggle('active', t.getAttribute('data-tab') === targetId));
+    tabContents.forEach(c => c.classList.toggle('active', c.id === targetId));
+  }
+
   navTabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-      navTabs.forEach(t => t.classList.remove('active'));
-      tabContents.forEach(c => c.classList.remove('active'));
-      tab.classList.add('active');
-      const targetId = tab.getAttribute('data-tab');
-      const targetElem = document.getElementById(targetId);
-      if (targetElem) targetElem.classList.add('active');
-    });
+    tab.addEventListener('click', () => activateTab(tab.getAttribute('data-tab')));
   });
 
   // Findings Filtering Logic
@@ -2897,8 +3049,8 @@ allow-staging-debug  vpc-analytics-prod    0.0.0.0/0                     tcp:808
     saasSearch.addEventListener('input', filterSaas);
   }
 
-  // Copy to Clipboard Helper
-  function copySnippet(btn, text) {
+  // Copy to Clipboard Helpers
+  function copyTextToClipboard(btn, text) {
     if (!navigator.clipboard) {
       const ta = document.createElement('textarea');
       ta.value = text;
@@ -2916,6 +3068,24 @@ allow-staging-debug  vpc-analytics-prod    0.0.0.0/0                     tcp:808
     });
   }
 
+  function copyTerminalCmd(btn) {
+    const term = btn.closest('.terminal-window');
+    if (!term) return;
+    const cmdEl = term.querySelector('.terminal-cmd');
+    if (cmdEl) copyTextToClipboard(btn, cmdEl.innerText || cmdEl.textContent || '');
+  }
+
+  function copyTerminalOut(btn) {
+    const term = btn.closest('.terminal-window');
+    if (!term) return;
+    const outEl = term.querySelector('.terminal-out');
+    if (outEl) copyTextToClipboard(btn, outEl.innerText || outEl.textContent || '');
+  }
+
+  function copySnippet(btn, text) {
+    copyTextToClipboard(btn, text);
+  }
+
   function showCopied(btn) {
     const orig = btn.innerText;
     btn.innerText = 'Copied!';
@@ -2925,6 +3095,69 @@ allow-staging-debug  vpc-analytics-prod    0.0.0.0/0                     tcp:808
       btn.classList.remove('copied');
     }, 1800);
   }
+
+  // --- KPI severity cards jump to the filtered Findings tab ---
+  document.querySelectorAll('.kpi-card.clickable').forEach(card => {
+    card.addEventListener('click', () => {
+      const sev = card.getAttribute('data-jump-sev') || 'ALL';
+      activateTab('tab-findings');
+      const pill = document.querySelector('#findings-severity-filters .filter-pill[data-filter="' + sev + '"]');
+      if (pill) pill.click();
+      const tf = document.getElementById('tab-findings');
+      if (tf) tf.scrollIntoView({behavior: 'smooth', block: 'start'});
+    });
+  });
+
+  // --- Asset id links (in Findings) jump to the matching Assets row ---
+  document.querySelectorAll('a.asset-link').forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const id = link.getAttribute('data-asset-id');
+      activateTab('tab-assets');
+      const row = document.getElementById('asset-' + id);
+      if (row) {
+        row.scrollIntoView({behavior: 'smooth', block: 'center'});
+        row.classList.remove('asset-flash');
+        void row.offsetWidth;  // restart the flash animation
+        row.classList.add('asset-flash');
+      }
+    });
+  });
+
+  // --- Assets tab: free-text search + type filter ---
+  const assetSearch = document.getElementById('asset-search-input');
+  const assetType = document.getElementById('asset-type-filter');
+  const assetRows = document.querySelectorAll('.asset-row');
+  const assetNoRes = document.getElementById('assets-no-results');
+  function filterAssets() {
+    const q = (assetSearch ? assetSearch.value.trim().toLowerCase() : '');
+    const t = (assetType ? assetType.value : 'ALL');
+    let vis = 0;
+    assetRows.forEach(row => {
+      const okType = (t === 'ALL' || row.getAttribute('data-type') === t);
+      const okText = (!q || (row.getAttribute('data-text') || '').includes(q));
+      if (okType && okText) { row.style.display = ''; vis++; } else { row.style.display = 'none'; }
+    });
+    if (assetNoRes) assetNoRes.style.display = (vis === 0 && assetRows.length > 0) ? 'block' : 'none';
+  }
+  if (assetSearch) assetSearch.addEventListener('input', filterAssets);
+  if (assetType) assetType.addEventListener('change', filterAssets);
+
+  // --- Tab-level search over every table in a tab (Web & Cloud) ---
+  function wireTabSearch(inputId, tabId) {
+    const inp = document.getElementById(inputId);
+    const tab = document.getElementById(tabId);
+    if (!inp || !tab) return;
+    const rows = tab.querySelectorAll('table tbody tr');
+    inp.addEventListener('input', () => {
+      const q = inp.value.trim().toLowerCase();
+      rows.forEach(r => {
+        r.style.display = (!q || r.textContent.toLowerCase().includes(q)) ? '' : 'none';
+      });
+    });
+  }
+  wireTabSearch('web-search-input', 'tab-web');
+  wireTabSearch('cloud-search-input', 'tab-cloud');
 </script>
 
 </body>

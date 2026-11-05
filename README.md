@@ -462,16 +462,21 @@ Azure tenant. Aliases: `osint→passive`, `redteam/attacker→external`, `leaks�
 ```text
 runs/<scope>/
   findings_history.json    Every finding key with the run dates it was seen on (ages persisting / reappearing findings)
+  assets.json              Asset-identifier registry: maps each asset (IP/host) to a stable id (e.g. ROUTER-001),
+                           persisted so an asset keeps its id across runs (for risk tracking and forensics)
 runs/<scope>/<date>/
-  report.html              Interactive dark-mode HTML dashboard (6 tabs + CLI terminal explorer)
+  report.html              Interactive dark-mode HTML dashboard (7 tabs + CLI terminal explorer): findings grouped
+                           by asset with an ID column, an Assets tab (per-asset tests/findings/CVEs, search + type
+                           filter), clickable severity KPI cards that jump to the filtered findings, and per-tab search
   report.md                Comprehensive Markdown report with collapsible CLI evidence
   ai_bundle.md             Compact, self-contained companion for LLM analysis: run metadata,
                            coverage gaps and every structured source file embedded (path-tagged);
                            console logs and huge dumps are left out to fit a model's context window.
                            Rebuild the reports from it with --report-from-bundle.
-  findings_auto.md / .tsv  Prioritised finding candidates
+  findings_auto.md / .tsv  Prioritised finding candidates (with an Asset ID column; rows grouped by asset)
   findings.jsonl           The same candidates, one JSON object per line (status "candidate"), for trackers/scripts
   assets.jsonl             Hostnames, live web URLs and open TCP ports collected by the run
+  assets.tsv               Asset inventory: id, type, label, key, product/version, open ports, findings and CVEs per asset
   diff.md                  New / Reappeared / Resolved / Not re-checked / Persisting findings vs previous run
                            (a finding only counts as resolved if its phase ran in both runs)
   run.meta                 Scope, date, authorisation, phases, Docker mode, egress IP

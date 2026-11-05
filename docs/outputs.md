@@ -7,11 +7,13 @@ findings, a diff against the previous run, and the reports.
 ```text
 runs/<scope>/
   findings_history.json    Every finding key + the run dates it was seen on (ages persisting/reappearing findings)
+  assets.json              Asset-id registry: maps each asset to a stable id (ROUTER-001…), persisted across runs
 runs/<scope>/<date>/
-  report.html              Interactive dark-mode dashboard (tabs + CLI terminal explorer)
+  report.html              Interactive dark-mode dashboard (tabs + CLI terminal explorer + Assets tab)
   report.md                Full Markdown report with collapsible CLI evidence
   ai_bundle.md             Compact, self-contained companion for LLM analysis (see below)
-  findings_auto.md / .tsv  Prioritised finding candidates (with Target column)
+  findings_auto.md / .tsv  Prioritised finding candidates (Asset ID + Target columns; rows grouped by asset)
+  assets.tsv               Asset inventory: id, type, label, key, product/version, open ports, findings, CVEs
   diff.md                  New / Reappeared / Resolved / Not re-checked / Persisting vs. previous run
   run.meta                 Scope, date, authorisation, phases, Docker mode, egress IP
   tool_versions.txt        Detected tool versions / Docker images
@@ -50,12 +52,41 @@ that, `diff.md` classifies each finding relative to the previous run:
 This "not re-checked ≠ resolved" rule is what makes the diff trustworthy across
 runs where a tool was temporarily unavailable.
 
+## Assets
+
+Every target is aggregated into an **asset** (keyed by IP or host) and given a
+**stable, human-readable identifier** — `ROUTER-001`, `WEB-004`, `K8S-002`, and so
+on. The id is assigned on first sight and persisted in `runs/<scope>/assets.json`,
+so an asset keeps the same id across runs — the anchor a risk tracker or a forensic
+timeline needs. The type is re-evaluated each run (a host can become a web asset),
+but the id never changes.
+
+An asset gathers everything known about it: reverse DNS / org, cloud resource
+name, open ports and services, product/versions, correlated CVEs, and the findings
+whose target points at it. Types are classified from that evidence:
+`ROUTER, FW, VPN, K8S, LB, MAIL, DB, DC, WEB, CLOUD, HOST, DOMAIN, ASSET`.
+
+- `assets.tsv` — the full inventory (one row per asset).
+- `findings_auto.*` carry an **Asset ID** column, and rows are **grouped by asset**
+  (assets ordered by their worst finding severity; org/tenant-level findings with
+  no asset keep their own severity rank).
+
 ## The HTML dashboard (`report.html`)
 
-A single self-contained dark-mode page: tabbed views of findings, the attack
-surface, cloud/SaaS posture, and the diff, plus a **CLI terminal explorer** that
-lets you browse every captured command and its output from `console/`. No server
-or network needed — open the file.
+A single self-contained dark-mode page; no server or network needed — open the
+file. Tabs cover findings, assets, hosts/CVEs, the web surface, cloud/SaaS/DNS
+posture, and a **CLI terminal explorer** for every captured command and its output.
+
+Built for triage and forensics:
+
+- **Assets tab** — one row per asset (id, type, label + key, product/version, open
+  ports, its findings as severity badges, and its CVEs) with a search box and a
+  **type filter**.
+- **Findings grouped by asset**, each row showing its Asset ID; clicking the id
+  jumps to that asset's row in the Assets tab and highlights it.
+- **Clickable severity KPI cards** ("Critical 3" …) jump straight to the Findings
+  tab filtered to that severity.
+- **Search boxes** on the findings, assets, hosts/CVEs, web, cloud and CLI tabs.
 
 ## The AI bundle (`ai_bundle.md`)
 
@@ -78,6 +109,8 @@ python3 scylax.py --report-from-bundle runs/<scope>/<date>/ai_bundle.md
 
 | File | Contents |
 |---|---|
+| `assets.tsv` | Asset inventory: id, type, label, key, product/version, open ports, findings, CVEs. |
+| `../assets.json` | Scope-level asset-id registry (stable ids across runs). |
 | `osint/new_subdomains.txt` | Subdomains first seen this run. |
 | `osint/ct_first_seen.tsv` | First certificate seen per host (certspotter fallback). |
 | `osint/skipped_targets.tsv` | Resolved IPs outside ownership — recorded, never scanned. |

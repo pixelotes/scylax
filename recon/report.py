@@ -14,6 +14,14 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
+from recon.assets import (
+    SEV_RANK,
+    asset_label,
+    asset_ports,
+    asset_product,
+    build_assets,
+)
+
 
 # =====================================================================
 # Phase Name Normalization
@@ -189,7 +197,40 @@ class RunData:
         self.all_posture: list[dict[str, str]] = self.azure_posture + self.gcp_posture + self.aws_posture
         self.saas_posture: list[dict[str, str]] = self._load_saas_posture()
         self.commands: list[dict[str, Any]] = self._load_commands()
+        # Asset inventory: assigns stable ids, tags each finding with asset_id,
+        # then regroups findings so same-asset rows are consecutive (assets with
+        # the most severe finding first).
+        self.assets: list[dict[str, Any]] = build_assets(self)
+        self._regroup_findings_by_asset()
         self.kpis: dict[str, Any] = self._calculate_kpis()
+
+    def _regroup_findings_by_asset(self) -> None:
+        # Group rows that share an asset so they appear consecutively, and order
+        # groups by their worst finding severity. A finding with no asset is its
+        # own one-row group ranked by its own severity, so an org/tenant-level
+        # critical is not buried below low-severity asset rows. At equal severity,
+        # asset groups come before solo rows.
+        def group_key(f: dict[str, str]) -> str:
+            aid = f.get("asset_id", "")
+            return aid if aid else ("￿solo:" + f.get("key", ""))
+
+        group_rank: dict[str, int] = {}
+        for f in self.findings:
+            r = SEV_RANK.get(f.get("severity", "INFO").upper(), 4)
+            gk = group_key(f)
+            group_rank[gk] = min(group_rank.get(gk, 9), r)
+
+        def sort_key(f: dict[str, str]) -> tuple:
+            gk = group_key(f)
+            return (
+                group_rank[gk],                        # group's worst severity
+                0 if f.get("asset_id") else 1,         # assets before solo rows
+                gk,                                    # keep an asset's rows together
+                SEV_RANK.get(f.get("severity", "INFO").upper(), 4),
+                f.get("title", "").lower(),
+            )
+
+        self.findings.sort(key=sort_key)
 
     def _load_meta(self) -> dict[str, str]:
         meta_path = self.run_dir / "run.meta"
@@ -839,17 +880,39 @@ def generate_markdown(data: RunData) -> str:
     lines.append("")
     lines.append("*All findings are automated candidates to validate through manual review, not definitive penetration test conclusions.*\n")
     if data.findings:
-        lines.append("| Severity | Finding Title | Target | Evidence | Rule Key |")
-        lines.append("|---|---|---|---|---|")
+        lines.append("| Severity | Asset | Finding Title | Target | Evidence | Rule Key |")
+        lines.append("|---|---|---|---|---|---|")
         for f in data.findings:
             sev_badge = f"`{f['severity']}`"
+            asset_id = f"`{f['asset_id']}`" if f.get("asset_id") else "-"
             title = _escape_md_cell(f["title"])
             evidence = _escape_md_cell(f["evidence"])
             key = f"`{_escape_md_cell(f['key'])}`" if f["key"] else "-"
             target = _escape_md_cell(f.get("target", "")) or "-"
-            lines.append(f"| {sev_badge} | {title} | {target} | `{evidence}` | {key} |")
+            lines.append(f"| {sev_badge} | {asset_id} | {title} | {target} | `{evidence}` | {key} |")
     else:
         lines.append("*No automated finding candidates identified for this run.*")
+    lines.append("")
+
+    # Section 2b: Asset inventory
+    lines.append("## 2b. Asset Inventory")
+    lines.append("")
+    lines.append("*Stable identifiers (persisted per scope) group tests, findings and CVEs by asset for risk review and forensics.*\n")
+    if data.assets:
+        lines.append("| ID | Type | Asset | Product / Version | Open Ports | Findings | CVEs |")
+        lines.append("|---|---|---|---|---|---|---|")
+        for a in data.assets:
+            fcount = len(a["findings"])
+            fcell = _escape_md_cell("; ".join(f.get("title", "") for f in a["findings"])) if fcount else "-"
+            fcell = f"{fcount} — {fcell}" if fcount else "-"
+            cves = ", ".join(sorted({c["cve"] for c in a["cves"] if c.get("cve")})) or "-"
+            lines.append(
+                f"| `{a['id']}` | {a['type']} | {_escape_md_cell(asset_label(a))} "
+                f"(`{_escape_md_cell(a['key'])}`) | {_escape_md_cell(asset_product(a))} "
+                f"| {_escape_md_cell(asset_ports(a))} | {fcell} | {_escape_md_cell(cves)} |"
+            )
+    else:
+        lines.append("*No assets identified for this run.*")
     lines.append("")
 
     # Section 3: Service Inventory & CVE / CISA KEV Correlation
@@ -1190,6 +1253,51 @@ def generate_html(data: RunData) -> str:
             seen_phases.add(p)
             command_phases.append(p)
 
+    # --- Asset inventory tab (precomputed rows + type-filter options) ---
+    _asset_types = sorted({a["type"] for a in data.assets})
+    asset_type_options = "".join(
+        f'<option value="{html.escape(t)}">{html.escape(t)}</option>' for t in _asset_types
+    )
+
+    def _asset_row(a: dict) -> str:
+        findings = sorted(a["findings"], key=lambda f: SEV_RANK.get(f.get("severity", "INFO").upper(), 4))
+        if findings:
+            fcell = "".join(
+                f'<span class="badge badge-{f["severity"].lower()}" title="{html.escape(f.get("title",""))}">'
+                f'{html.escape(f.get("title",""))}</span> '
+                for f in findings
+            )
+        else:
+            fcell = '<span class="muted">none</span>'
+        cve_ids = sorted({c["cve"] for c in a["cves"] if c.get("cve")})
+        has_kev = any(c.get("is_kev") for c in a["cves"])
+        if cve_ids:
+            kev = ' <span class="badge badge-kev">KEV</span>' if has_kev else ""
+            ccell = f'<span class="mono">{html.escape(", ".join(cve_ids))}</span>{kev}'
+        else:
+            ccell = '<span class="muted">-</span>'
+        worst = min((SEV_RANK.get(f.get("severity", "INFO").upper(), 4) for f in findings), default=4)
+        worst_name = ["critical", "high", "medium", "low", "info"][worst]
+        search_blob = " ".join([
+            a["id"], a["type"], asset_label(a), a["key"], asset_product(a), asset_ports(a),
+            " ".join(f.get("title", "") for f in findings), " ".join(cve_ids),
+        ]).lower()
+        return (
+            f'<tr class="asset-row" id="asset-{html.escape(a["id"])}" '
+            f'data-type="{html.escape(a["type"])}" data-text="{html.escape(search_blob)}">'
+            f'<td><code class="pill pill-{worst_name}">{html.escape(a["id"])}</code></td>'
+            f'<td><span class="badge badge-info">{html.escape(a["type"])}</span></td>'
+            f'<td><strong>{html.escape(asset_label(a))}</strong><br><span class="mono muted">{html.escape(a["key"])}</span></td>'
+            f'<td class="mono">{html.escape(asset_product(a))}</td>'
+            f'<td class="mono">{html.escape(asset_ports(a))}</td>'
+            f'<td>{fcell}</td>'
+            f'<td>{ccell}</td>'
+            f'</tr>'
+        )
+
+    asset_rows_html = "".join(_asset_row(a) for a in data.assets) or \
+        "<tr><td colspan='7' class='empty-state'>No assets identified</td></tr>"
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1491,6 +1599,21 @@ def generate_html(data: RunData) -> str:
     border: 1px solid #334155;
   }}
 
+  /* Asset inventory helpers */
+  .muted {{ color: var(--text-secondary); opacity: 0.75; }}
+  .card-subtitle {{ color: var(--text-secondary); font-size: 0.8rem; font-weight: 400; margin-left: 0.5rem; }}
+  a.asset-link {{ text-decoration: none; }}
+  a.asset-link:hover code.pill {{ border-color: var(--accent); color: var(--accent); }}
+  tr.asset-flash {{ animation: assetFlash 1.6s ease; }}
+  @keyframes assetFlash {{ 0% {{ background: rgba(56,189,248,0.25); }} 100% {{ background: transparent; }} }}
+  code.pill.pill-critical {{ color: #fca5a5; border-color: rgba(239,68,68,0.5); }}
+  code.pill.pill-high {{ color: #fdba74; border-color: rgba(249,115,22,0.5); }}
+  code.pill.pill-medium {{ color: #fde047; border-color: rgba(234,179,8,0.5); }}
+  code.pill.pill-low {{ color: #93c5fd; border-color: rgba(59,130,246,0.5); }}
+  code.pill.pill-info {{ color: #d1d5db; border-color: rgba(107,114,128,0.5); }}
+  .kpi-card.clickable {{ cursor: pointer; }}
+  .kpi-card.clickable:hover {{ border-color: var(--border-bright); transform: translateY(-2px); }}
+
   /* Filter Controls */
   .filter-bar {{
     display: flex;
@@ -1691,6 +1814,9 @@ def generate_html(data: RunData) -> str:
     <button class="nav-tab" data-tab="tab-findings">
       Findings &amp; Weaknesses <span class="tab-badge">{k['total_findings']}</span>
     </button>
+    <button class="nav-tab" data-tab="tab-assets">
+      Assets <span class="tab-badge">{len(data.assets)}</span>
+    </button>
     <button class="nav-tab" data-tab="tab-hosts">
       Hosts, Services &amp; CVEs <span class="tab-badge">{k['cves_total']}</span>
     </button>
@@ -1715,7 +1841,7 @@ def generate_html(data: RunData) -> str:
     
     <div class="kpi-section-title">Severity KPI Cards</div>
     <div class="kpi-grid">
-      <div class="kpi-card kpi-critical">
+      <div class="kpi-card kpi-critical clickable" data-jump-sev="CRITICAL" title="Show critical findings">
         <div class="kpi-top">
           <span class="kpi-label">Critical</span>
           <span class="badge badge-critical">Critical</span>
@@ -1723,7 +1849,7 @@ def generate_html(data: RunData) -> str:
         <div class="kpi-value">{k['critical']}</div>
         <div class="kpi-subtext">RCE / Exposed Mgmt</div>
       </div>
-      <div class="kpi-card kpi-high">
+      <div class="kpi-card kpi-high clickable" data-jump-sev="HIGH" title="Show high findings">
         <div class="kpi-top">
           <span class="kpi-label">High</span>
           <span class="badge badge-high">High</span>
@@ -1731,7 +1857,7 @@ def generate_html(data: RunData) -> str:
         <div class="kpi-value">{k['high']}</div>
         <div class="kpi-subtext">Direct Takeover / Gaps</div>
       </div>
-      <div class="kpi-card kpi-medium">
+      <div class="kpi-card kpi-medium clickable" data-jump-sev="MEDIUM" title="Show medium findings">
         <div class="kpi-top">
           <span class="kpi-label">Medium</span>
           <span class="badge badge-medium">Medium</span>
@@ -1739,7 +1865,7 @@ def generate_html(data: RunData) -> str:
         <div class="kpi-value">{k['medium']}</div>
         <div class="kpi-subtext">Email / TLS / Service Posture</div>
       </div>
-      <div class="kpi-card kpi-low">
+      <div class="kpi-card kpi-low clickable" data-jump-sev="LOW" title="Show low findings">
         <div class="kpi-top">
           <span class="kpi-label">Low</span>
           <span class="badge badge-low">Low</span>
@@ -1747,7 +1873,7 @@ def generate_html(data: RunData) -> str:
         <div class="kpi-value">{k['low']}</div>
         <div class="kpi-subtext">Defensive Headers / Hardening</div>
       </div>
-      <div class="kpi-card">
+      <div class="kpi-card clickable" data-jump-sev="ALL" title="Show all findings">
         <div class="kpi-top">
           <span class="kpi-label">Info / Total</span>
           <span class="badge badge-info">Total</span>
@@ -1888,6 +2014,7 @@ def generate_html(data: RunData) -> str:
             <thead>
               <tr>
                 <th style="width: 110px;">Severity</th>
+                <th style="width: 110px;">Asset</th>
                 <th>Finding Title</th>
                 <th>Target</th>
                 <th>Affected Asset / Evidence</th>
@@ -1895,16 +2022,57 @@ def generate_html(data: RunData) -> str:
               </tr>
             </thead>
             <tbody>
-              {"".join(f'''<tr class="finding-row" data-severity="{f['severity']}" data-text="{html.escape(f['title'].lower())} {html.escape(f.get('target', '').lower())} {html.escape(f['key'].lower())} {html.escape(f['evidence'].lower())}">
+              {"".join(f'''<tr class="finding-row" data-severity="{f['severity']}" data-asset="{html.escape(f.get('asset_id',''))}" data-text="{html.escape(f['title'].lower())} {html.escape(f.get('target', '').lower())} {html.escape(f['key'].lower())} {html.escape(f['evidence'].lower())} {html.escape(f.get('asset_id','').lower())}">
                 <td><span class="badge badge-{f['severity'].lower()}">{f['severity']}</span></td>
+                <td>{(f'<a class="asset-link" href="#" data-asset-id="' + html.escape(f['asset_id']) + '"><code class="pill">' + html.escape(f['asset_id']) + '</code></a>') if f.get('asset_id') else '<span class="muted">-</span>'}</td>
                 <td><strong>{html.escape(f['title'])}</strong></td>
                 <td class="mono">{_target_html(f.get('target', ''))}</td>
                 <td class="mono"><code>{html.escape(f['evidence'])}</code></td>
                 <td><code class="pill">{html.escape(f['key'])}</code></td>
-              </tr>''' for f in data.findings) if data.findings else "<tr><td colspan='5' class='empty-state'>No candidate findings identified</td></tr>"}
+              </tr>''' for f in data.findings) if data.findings else "<tr><td colspan='6' class='empty-state'>No candidate findings identified</td></tr>"}
             </tbody>
           </table>
           <div id="findings-no-results" class="empty-state" style="display: none;">No findings match your filter criteria.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================= -->
+  <!-- TAB: ASSET INVENTORY -->
+  <!-- ================================================================= -->
+  <section id="tab-assets" class="tab-content">
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Asset Inventory</span>
+        <span class="card-subtitle">Stable identifiers group tests, findings and CVEs per asset for risk review and forensics.</span>
+      </div>
+      <div class="card-body">
+        <div class="filter-bar">
+          <select class="search-input" id="asset-type-filter" style="max-width: 220px;">
+            <option value="ALL">All types ({len(data.assets)})</option>
+            {asset_type_options}
+          </select>
+          <input type="text" class="search-input" id="asset-search-input" placeholder="Search id, type, name, IP, product, port, finding, CVE...">
+        </div>
+        <div class="table-responsive">
+          <table id="assets-table">
+            <thead>
+              <tr>
+                <th style="width: 110px;">ID</th>
+                <th style="width: 120px;">Type</th>
+                <th>Asset</th>
+                <th>Product / Version</th>
+                <th>Open Ports</th>
+                <th>Findings</th>
+                <th>CVEs</th>
+              </tr>
+            </thead>
+            <tbody>
+              {asset_rows_html}
+            </tbody>
+          </table>
+          <div id="assets-no-results" class="empty-state" style="display: none;">No assets match your filter criteria.</div>
         </div>
       </div>
     </div>
@@ -1979,7 +2147,11 @@ def generate_html(data: RunData) -> str:
   <!-- TAB 4: WEB & ENTRY POINTS -->
   <!-- ================================================================= -->
   <section id="tab-web" class="tab-content">
-    
+
+    <div class="filter-bar">
+      <input type="text" class="search-input" id="web-search-input" placeholder="Filter web tables: path, URL, parameter, host...">
+    </div>
+
     <div class="grid-2">
       <!-- Exposed Paths -->
       <div class="card">
@@ -2108,7 +2280,11 @@ def generate_html(data: RunData) -> str:
   <!-- TAB 5: CLOUD & DNS POSTURE -->
   <!-- ================================================================= -->
   <section id="tab-cloud" class="tab-content">
-    
+
+    <div class="filter-bar">
+      <input type="text" class="search-input" id="cloud-search-input" placeholder="Filter cloud/DNS tables: IP, resource, rule, domain...">
+    </div>
+
     <!-- DNS & Mail Posture -->
     <div class="card">
       <div class="card-header">
@@ -2515,15 +2691,13 @@ def generate_html(data: RunData) -> str:
   const navTabs = document.querySelectorAll('.nav-tab');
   const tabContents = document.querySelectorAll('.tab-content');
 
+  function activateTab(targetId) {{
+    navTabs.forEach(t => t.classList.toggle('active', t.getAttribute('data-tab') === targetId));
+    tabContents.forEach(c => c.classList.toggle('active', c.id === targetId));
+  }}
+
   navTabs.forEach(tab => {{
-    tab.addEventListener('click', () => {{
-      navTabs.forEach(t => t.classList.remove('active'));
-      tabContents.forEach(c => c.classList.remove('active'));
-      tab.classList.add('active');
-      const targetId = tab.getAttribute('data-tab');
-      const targetElem = document.getElementById(targetId);
-      if (targetElem) targetElem.classList.add('active');
-    }});
+    tab.addEventListener('click', () => activateTab(tab.getAttribute('data-tab')));
   }});
 
   // Findings Filtering Logic
@@ -2744,6 +2918,69 @@ def generate_html(data: RunData) -> str:
       btn.classList.remove('copied');
     }}, 1800);
   }}
+
+  // --- KPI severity cards jump to the filtered Findings tab ---
+  document.querySelectorAll('.kpi-card.clickable').forEach(card => {{
+    card.addEventListener('click', () => {{
+      const sev = card.getAttribute('data-jump-sev') || 'ALL';
+      activateTab('tab-findings');
+      const pill = document.querySelector('#findings-severity-filters .filter-pill[data-filter="' + sev + '"]');
+      if (pill) pill.click();
+      const tf = document.getElementById('tab-findings');
+      if (tf) tf.scrollIntoView({{behavior: 'smooth', block: 'start'}});
+    }});
+  }});
+
+  // --- Asset id links (in Findings) jump to the matching Assets row ---
+  document.querySelectorAll('a.asset-link').forEach(link => {{
+    link.addEventListener('click', (e) => {{
+      e.preventDefault();
+      const id = link.getAttribute('data-asset-id');
+      activateTab('tab-assets');
+      const row = document.getElementById('asset-' + id);
+      if (row) {{
+        row.scrollIntoView({{behavior: 'smooth', block: 'center'}});
+        row.classList.remove('asset-flash');
+        void row.offsetWidth;  // restart the flash animation
+        row.classList.add('asset-flash');
+      }}
+    }});
+  }});
+
+  // --- Assets tab: free-text search + type filter ---
+  const assetSearch = document.getElementById('asset-search-input');
+  const assetType = document.getElementById('asset-type-filter');
+  const assetRows = document.querySelectorAll('.asset-row');
+  const assetNoRes = document.getElementById('assets-no-results');
+  function filterAssets() {{
+    const q = (assetSearch ? assetSearch.value.trim().toLowerCase() : '');
+    const t = (assetType ? assetType.value : 'ALL');
+    let vis = 0;
+    assetRows.forEach(row => {{
+      const okType = (t === 'ALL' || row.getAttribute('data-type') === t);
+      const okText = (!q || (row.getAttribute('data-text') || '').includes(q));
+      if (okType && okText) {{ row.style.display = ''; vis++; }} else {{ row.style.display = 'none'; }}
+    }});
+    if (assetNoRes) assetNoRes.style.display = (vis === 0 && assetRows.length > 0) ? 'block' : 'none';
+  }}
+  if (assetSearch) assetSearch.addEventListener('input', filterAssets);
+  if (assetType) assetType.addEventListener('change', filterAssets);
+
+  // --- Tab-level search over every table in a tab (Web & Cloud) ---
+  function wireTabSearch(inputId, tabId) {{
+    const inp = document.getElementById(inputId);
+    const tab = document.getElementById(tabId);
+    if (!inp || !tab) return;
+    const rows = tab.querySelectorAll('table tbody tr');
+    inp.addEventListener('input', () => {{
+      const q = inp.value.trim().toLowerCase();
+      rows.forEach(r => {{
+        r.style.display = (!q || r.textContent.toLowerCase().includes(q)) ? '' : 'none';
+      }});
+    }});
+  }}
+  wireTabSearch('web-search-input', 'tab-web');
+  wireTabSearch('cloud-search-input', 'tab-cloud');
 </script>
 
 </body>
