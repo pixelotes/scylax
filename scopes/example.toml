@@ -132,6 +132,28 @@ shodan_api_key = ""
 # HaveIBeenPwned: enterprise domain breach and leaked account exposure audit (Phase 9).
 hibp_api_key = ""
 
+# Passive subdomain sources for Phase 1. Scylax writes these (plus shodan_api_key above) into
+# temporary subfinder/amass provider configs for the run and deletes them afterwards, so no
+# export is needed. Each key may also come from the upper-cased env var (e.g. VIRUSTOTAL_API_KEY).
+# Leave empty to skip a source; all have a free tier.
+securitytrails_api_key = ""
+virustotal_api_key = ""
+binaryedge_api_key = ""
+fullhunt_api_key = ""
+chaos_api_key = ""            # ProjectDiscovery Chaos
+bevigil_api_key = ""
+urlscan_api_key = ""
+leakix_api_key = ""
+netlas_api_key = ""
+github_token = ""             # personal access token (public_repo read is enough)
+passivetotal_username = ""    # RiskIQ PassiveTotal: account email + API key
+passivetotal_api_key = ""
+censys_api_id = ""            # subfinder only (amass v5 has no Censys source)
+censys_api_secret = ""
+
+# NIST NVD: ~10x higher rate limit for CVE correlation when Shodan CVEDB is unreachable.
+nvd_api_key = ""
+
 [content_discovery]
 # Phase C: content discovery (optional, opt-in). Actively checks whether paths that
 # should not be reachable are exposed — control panels, API docs (Swagger/FastAPI),
@@ -169,12 +191,34 @@ providers = ["m365", "github", "google"]
 # CLI & auth: Google Apps Manager (`gam` CLI or GAM_PATH env var) authenticated as super admin:
 #   gam info domain
 
+[saas_exposure]
+# Phase E (opt-in): anonymous, read-only checks of third-party SaaS tenants named after the organisation
+# (Atlassian Cloud: <name>.atlassian.net). Fixed endpoints only; names default to the first label of each public domain.
+enabled = false
+org_names = []                # extra tenant names to try, e.g. ["contoso-corp"]
+
+# Optional: also run Intigriti's misconfig-mapper (go install github.com/intigriti/misconfig-mapper/cmd/misconfig-mapper@latest)
+# against the same names. Scylax always passes -permutations false (exact names only), a delay between
+# requests, and only the templates that are plain GET requests: templates that POST a payload are never run.
+# It never downloads templates itself: point misconfig_templates at a folder holding services.json
+# (fetch it once with: misconfig-mapper -update-templates -templates DIR) or keep ./templates in the working dir.
+use_misconfig_mapper = false
+misconfig_services = []       # names or ids to restrict to, e.g. ["atlassian", "jenkins"]; empty = every plain-GET template
+misconfig_templates = ""
+misconfig_delay_ms = 1000
+
 [limits]
 # Scan rate limits (keep conservative on production networks).
 nmap_max_rate = 400           # packets/sec for HVT and cloud scans
 edge_max_rate = 40            # packets/sec for fragile edge fingerprinting
 nuclei_rate = 50              # requests/sec
+nuclei_batch_size = 15        # targets per nuclei run (about 1.5 min per host at 50 req/s)
+nuclei_batch_timeout_min = 40 # a batch that exceeds this is stopped; its partial findings are kept
 httpx_rate = 50               # requests/sec
+
+# Phase 4 service scans also enumerate TLS protocols/ciphers (nmap ssl-enum-ciphers) for the TLS posture
+# candidates. Set to false to skip it (faster, fewer handshakes).
+tls_enum_ciphers = true
 
 # Amass enumeration settings.
 use_amass = true

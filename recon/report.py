@@ -59,6 +59,8 @@ PHASE_LABELS: dict[str, str] = {
     "w": "Annex W: AWS",
     "annex w": "Annex W: AWS",
     "annex w: aws": "Annex W: AWS",
+    "e": "Phase E: SaaS Exposure",
+    "phase e": "Phase E: SaaS Exposure",
     "t": "Phase T: Triage",
     "phase t": "Phase T: Triage",
     "phase t: triage": "Phase T: Triage",

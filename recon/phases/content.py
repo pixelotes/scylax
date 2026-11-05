@@ -18,6 +18,7 @@ from pathlib import Path
 
 from recon.config import RunContext
 from recon.deps import DependencyManager
+from recon.resilience import AdaptiveLimiter
 from recon.runner import Logger, ev, http_get, infra_failure, record_tool_failure, record_virtual_cmd
 from recon.scope import guard_for, ip_in, parse_networks
 from recon.webprobe import PROBE_BYTES
@@ -107,10 +108,11 @@ def _owned_bases(ctx: RunContext) -> list[str]:
 def _native_probe(bases: list[str], words: list[str], delay: float, log: Logger) -> list[tuple[str, str, int, int]]:
     rows: list[tuple[str, str, int, int]] = []
     budget = MAX_REQUESTS
+    get = AdaptiveLimiter(base_delay=0.0).wrap(http_get)  # backs off / gives up on hosts that throttle
 
     def probe(base: str, word: str) -> tuple[str, str, int, int] | None:
         url = f"{base}/{word}"
-        resp = http_get(url, timeout=8.0, verify_ssl=False, follow_redirects=False, max_bytes=PROBE_BYTES)
+        resp = get(url, timeout=8.0, verify_ssl=False, follow_redirects=False, max_bytes=PROBE_BYTES)
         if getattr(resp, "status", 0) in INTERESTING_STATUSES:
             return (base, word, resp.status, len(getattr(resp, "body", "") or ""))
         return None
@@ -166,10 +168,11 @@ def _traversal_probe(bases: list[str], delay: float) -> list[tuple[str, str, str
     """Probe each base for path traversal; keep only responses matching the signature.
     Returns (url, payload_category, snippet)."""
     hits: list[tuple[str, str, str]] = []
+    get = AdaptiveLimiter().wrap(http_get)
     for base in bases:
         for payload, sig in TRAVERSAL_PROBES:
             url = f"{base}{payload}"
-            resp = http_get(url, timeout=8.0, verify_ssl=False, follow_redirects=False, max_bytes=8192)
+            resp = get(url, timeout=8.0, verify_ssl=False, follow_redirects=False, max_bytes=8192)
             if getattr(resp, "status", 0) in (200, 206):
                 m = re.search(sig, getattr(resp, "body", "") or "")
                 if m:

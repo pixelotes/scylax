@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -12,6 +13,9 @@ from pathlib import Path
 from recon.config import RunContext
 from recon.deps import DependencyManager
 from recon.runner import Logger, ev, http_get, infra_failure, record_tool_failure, record_virtual_cmd, run_cmd
+from recon import tlsposture, wellknown
+from recon.phases.osint import NON_PUBLIC_TLDS
+from recon.resilience import AdaptiveLimiter
 from recon.scope import guard_for, ip_in, is_public_ip, parse_networks
 from recon.sensitive_paths import SENSITIVE_PATHS, probe_sensitive_paths
 from recon.webprobe import PROBE_BYTES, discover_api, is_ingress_default_404, sniff_root_data
@@ -361,6 +365,52 @@ def phase3(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         f"{len(exposed_rows)} exposed paths, {len(cors_cookie_rows)} CORS/cookie findings, "
         f"{len(root_rows)} root data files, {len(api_rows)} API endpoints"
     )
+    _wellknown_pivots(ctx, [u for u, (st, *_rest) in url_meta.items() if st in (200, 401, 403)], log)
+
+
+def _wellknown_pivots(ctx: RunContext, live_urls: list[str], log: Logger) -> None:
+    """security.txt and OpenID discovery: findings plus hostnames missing from enumeration."""
+    known: set[str] = set()
+    subs = ctx.osint_dir / "subdomains.txt"
+    if subs.is_file():
+        known = {l.strip().lower() for l in subs.read_text(encoding="utf-8", errors="replace").splitlines() if l.strip()}
+    domains = [d for d in ctx.scope.domains if d.rsplit(".", 1)[-1].lower() not in NON_PUBLIC_TLDS]
+    findings, pivots = wellknown.run(domains, live_urls, known, AdaptiveLimiter().wrap(http_get), ctx.today)
+    (ctx.web_dir / "wellknown_findings.tsv").write_text(
+        "".join("\t".join(c.replace("\t", " ").replace("\n", " ") for c in r) + "\n" for r in findings), encoding="utf-8"
+    )
+    (ctx.web_dir / "wellknown_hosts.tsv").write_text(
+        "source\tpath\thostname\tin_scope\tknown_subdomain\n" + "".join("\t".join(r) + "\n" for r in pivots), encoding="utf-8"
+    )
+    new = sum(1 for r in pivots if r[4] == "no")
+    log.info(f"Phase 3: well-known files: {len(findings)} candidate(s), {new} hostname(s) not in subdomain enumeration")
+
+
+def _collect_tls(ctx: RunContext, target_ips: list[str], log: Logger) -> None:
+    """TLS posture findings and certificate hostname pivots from the service-scan XML."""
+    services = []
+    for ip in target_ips:
+        services.extend(tlsposture.parse_nmap_tls(ctx.scan_dir / f"svc_{ip}.xml"))
+    rows = tlsposture.tls_findings(services, ctx.today)
+    (ctx.scan_dir / "tls_findings.tsv").write_text(
+        "".join("\t".join(c.replace("\t", " ").replace("\n", " ") for c in r) + "\n" for r in rows), encoding="utf-8"
+    )
+
+    known: set[str] = set()
+    subs = ctx.osint_dir / "subdomains.txt"
+    if subs.is_file():
+        known = {l.strip().lower() for l in subs.read_text(encoding="utf-8", errors="replace").splitlines() if l.strip()}
+    pivot_lines = ["ip\tport\thostname\tin_scope\tknown_subdomain\n"]
+    new_in_scope = 0
+    for ip, port, name in tlsposture.cert_names(services):
+        scoped = tlsposture.in_scope(name, ctx.scope.domains)
+        is_known = name in known
+        new_in_scope += scoped and not is_known
+        pivot_lines.append(f"{ip}\t{port}\t{name}\t{'yes' if scoped else 'no'}\t{'yes' if is_known else 'no'}\n")
+    (ctx.scan_dir / "cert_pivots.tsv").write_text("".join(pivot_lines), encoding="utf-8")
+    if services:
+        log.info(f"Phase 4: TLS posture on {len(services)} service(s): {len(rows)} candidate(s), "
+                 f"{new_in_scope} in-scope certificate hostname(s) missing from subdomain enumeration")
 
 
 def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
@@ -416,6 +466,7 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         scan_desc = "all 65535 ports"
         scan_title_suffix = "full"
 
+    tls_enum = bool(getattr(ctx.scope, "tls_enum_ciphers", True))
     log.info(f"Phase 4: Scanning {total} targets ({scan_desc}, rate: {ctx.scope.nmap_max_rate} pkts/s, max-retries: 1, host-timeout: 5m)")
 
     for idx, ip in enumerate(target_ips, 1):
@@ -484,21 +535,27 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                         "--max-rate",
                         str(ctx.scope.nmap_max_rate),
                         "--host-timeout",
-                        "5m",
+                        "8m" if tls_enum else "5m",
                         "-sV",
                         "--script",
-                        "banner,ssl-cert,ssh2-enum-algos,http-title,http-headers,http-server-header",
+                        "banner,ssl-cert,ssh2-enum-algos,http-title,http-headers,http-server-header"
+                        + (",ssl-enum-ciphers" if tls_enum else ""),
                         "-oA",
                         str(svc_prefix),
                         ip,
                     ],
                 ),
-                timeout=360,
+                timeout=540 if tls_enum else 360,
                 title=f"nmap service scan ({ip})",
             )
             log.ok(f"[{idx}/{total}] {ip}: {ports_csv}")
 
-    if hasattr(os, "geteuid") and os.geteuid() == 0:
+    _collect_tls(ctx, target_ips, log)
+
+    # nmap -sU needs raw sockets: root on the host, or nmap running in a
+    # container (which runs as root with CAP_NET_RAW by default).
+    nmap_in_docker = dm.get_provider("nmap") == "docker"
+    if nmap_in_docker or (hasattr(os, "geteuid") and os.geteuid() == 0):
         for idx, ip in enumerate(target_ips, 1):
             udp_prefix = ctx.scan_dir / f"udp_{ip}"
             log.info(f"[{idx}/{total}] Scanning UDP VPN ports on {ip}...")
@@ -525,7 +582,7 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 title=f"nmap UDP ({ip})",
             )
     else:
-        log.warn("UDP scan of VPN ports not performed (requires root; re-run with sudo for IKE/IPsec 500/4500)")
+        log.warn("UDP scan of VPN ports not performed (requires root; re-run with sudo or --docker for IKE/IPsec 500/4500)")
 
 
 def phase4b(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
@@ -708,42 +765,79 @@ def phase8(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     if not nuclei_ok:
         _sensitive_path_fallback(ctx, log, filtered_targets)
         return
-    res = ev(
-        ctx.console_dir,
-        "8",
-        dm.build_cmd(
-            "nuclei",
-            [
-                "-l",
-                str(nuclei_targets_file),
-                "-exclude-tags",
-                "intrusive,dos,fuzz,brute,default-login,xss,sqli,rce,lfi",
-                "-severity",
-                "medium,high,critical",
-                "-rate-limit",
-                str(ctx.scope.nuclei_rate),
-                "-silent",
-                "-jsonl",
-                "-o",
-                str(nuclei_jsonl),
-            ],
-        ),
-        timeout=1800,
-        title="nuclei scan",
-    )
+    # nuclei runs in batches: one slow or hung batch (nuclei needs ~1.5 min per host with
+    # medium+ templates at the default rate) costs only that batch, never the whole phase,
+    # and the findings of batches that finished are kept.
+    size = max(1, int(getattr(ctx.scope, "nuclei_batch_size", 15) or 15))
+    batch_timeout = max(5, int(getattr(ctx.scope, "nuclei_batch_timeout_min", 40) or 40)) * 60
+    batches = [filtered_targets[i:i + size] for i in range(0, len(filtered_targets), size)]
+    for stale in list(ctx.web_dir.glob("nuclei_*.jsonl")) + list(ctx.web_dir.glob("nuclei_batch_*.txt")):
+        if not ctx.resume:
+            stale.unlink()
+    for marker in ctx.web_dir.glob(".nuclei_*.done"):
+        if not ctx.resume:
+            marker.unlink()
+    log.info(f"nuclei: {len(filtered_targets)} target(s) in {len(batches)} batch(es) of up to {size}, "
+             f"{batch_timeout // 60} min limit per batch")
 
-    if res.returncode != 0 or infra_failure(res):
-        record_tool_failure(ctx.run_dir, "8", "nuclei", infra_failure(res) or f"exit {res.returncode}")
-        log.warn("nuclei failed - running the native sensitive-path probe as a fallback")
-        _sensitive_path_fallback(ctx, log, filtered_targets)
-        return
-
-    findings_count = 0
-    if nuclei_jsonl.is_file():
-        findings_count = sum(
-            1 for line in nuclei_jsonl.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()
+    failed_targets: list[str] = []
+    failures: list[str] = []
+    out_files: list[Path] = []
+    for n, batch in enumerate(batches, 1):
+        sig = hashlib.sha256("\n".join(batch).encode()).hexdigest()[:8]
+        batch_file = ctx.web_dir / f"nuclei_batch_{sig}.txt"
+        batch_out = ctx.web_dir / f"nuclei_{sig}.jsonl"
+        marker = ctx.web_dir / f".nuclei_{sig}.done"
+        out_files.append(batch_out)
+        if marker.is_file():
+            log.info(f"nuclei batch {n}/{len(batches)}: reused (--resume)")
+            continue
+        batch_file.write_text("\n".join(batch) + "\n", encoding="utf-8")
+        log.info(f"nuclei batch {n}/{len(batches)}: {len(batch)} target(s)")
+        res = ev(
+            ctx.console_dir,
+            "8",
+            dm.build_cmd(
+                "nuclei",
+                [
+                    "-l",
+                    str(batch_file),
+                    "-exclude-tags",
+                    "intrusive,dos,fuzz,brute,default-login,xss,sqli,rce,lfi",
+                    "-severity",
+                    "medium,high,critical",
+                    "-rate-limit",
+                    str(ctx.scope.nuclei_rate),
+                    "-silent",
+                    "-jsonl",
+                    "-o",
+                    str(batch_out),
+                ],
+            ),
+            timeout=batch_timeout,
+            title=f"nuclei scan (batch {n}/{len(batches)})",
         )
-    log.ok(f"nuclei: {findings_count} findings")
+        reason = infra_failure(res) or (f"exit {res.returncode}" if res.returncode != 0 else "")
+        if reason:
+            failed_targets += batch
+            failures.append(f"batch {n}: {reason}")
+            log.warn(f"nuclei batch {n}/{len(batches)} failed ({reason}); its partial findings are kept and "
+                     f"its {len(batch)} target(s) get the native sensitive-path probe")
+        else:
+            marker.write_text("done\n", encoding="utf-8")
+
+    # One file for the triage, merged from every batch (including partial output of failed ones)
+    merged = [line for f in out_files if f.is_file()
+              for line in f.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]
+    nuclei_jsonl.write_text("".join(f"{l}\n" for l in merged), encoding="utf-8")
+
+    if failures:
+        record_tool_failure(
+            ctx.run_dir, "8", "nuclei",
+            f"{len(failures)} of {len(batches)} batch(es) failed ({failures[0].split(': ', 1)[1]})",
+        )
+        _sensitive_path_fallback(ctx, log, failed_targets)
+    log.ok(f"nuclei: {len(merged)} findings from {len(batches) - len(failures)}/{len(batches)} batch(es)")
 
 
 def _sensitive_path_fallback(ctx: RunContext, log: Logger, targets: list[str]) -> None:
@@ -753,7 +847,11 @@ def _sensitive_path_fallback(ctx: RunContext, log: Logger, targets: list[str]) -
         for t in targets if urllib.parse.urlparse(t).netloc
     })
     log.info(f"Sensitive-path probe: {len(SENSITIVE_PATHS)} curated paths on {len(bases)} owned base URL(s)")
-    hits = probe_sensitive_paths(bases, http_get)
+    def progress(done: int, total: int) -> None:
+        if total >= 20 and done % 10 == 0 and done < total:
+            log.info(f"Sensitive-path probe: {done}/{total} hosts")
+
+    hits = probe_sensitive_paths(bases, AdaptiveLimiter().wrap(http_get), progress=progress)
     rows = [f"{h.url}\t{h.category}\t{h.severity}\t{h.title}\t{h.snippet}" for h in hits]
     (ctx.web_dir / "sensitive_paths.tsv").write_text("".join(f"{r}\n" for r in rows), encoding="utf-8")
     record_virtual_cmd(

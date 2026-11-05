@@ -7,13 +7,16 @@ import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
+from typing import Dict, List
+
+from recon.osint_keys import INTEL_KEY_FIELDS
 
 
-DEFAULT_PHASES: List[str] = ["1", "2", "3", "4", "4b", "5", "6", "7", "8", "9", "A", "G", "W", "S", "C", "T"]
-ACTIVE_PHASES: set[str] = {"3", "4", "4b", "5", "8", "A", "G", "W", "C"}
+DEFAULT_PHASES: List[str] = ["1", "2", "3", "4", "4b", "5", "6", "7", "8", "9", "A", "G", "W", "S", "C", "E", "T"]
+ACTIVE_PHASES: set[str] = {"3", "4", "4b", "5", "8", "A", "G", "W", "C", "E"}
 CLOUD_PHASES: set[str] = {"A", "G", "W"}
 CONTENT_PHASES: set[str] = {"C"}
+EXPOSURE_PHASES: set[str] = {"E"}
 
 
 def _split_list(val: object) -> List[str]:
@@ -86,6 +89,12 @@ class ScopeConfig:
     runs_dir: str = ""
     alert_webhook: str = ""
     content_discovery: bool = False
+    saas_exposure: bool = False
+    saas_org_names: List[str] = field(default_factory=list)
+    use_misconfig_mapper: bool = False
+    misconfig_services: List[str] = field(default_factory=list)
+    misconfig_templates: str = ""
+    misconfig_delay_ms: int = 1000
     content_discovery_wordlist: str = ""
     content_discovery_rate: int = 20
     auto_discover_targets: bool = True
@@ -102,6 +111,7 @@ class ScopeConfig:
     aws_inventory_file: str = ""
     shodan_api_key: str = ""
     hibp_api_key: str = ""
+    intel_keys: Dict[str, str] = field(default_factory=dict)
     cloud_posture: bool = False
     use_prowler: bool = False
     saas_posture: bool = False
@@ -109,14 +119,20 @@ class ScopeConfig:
     nmap_max_rate: int = 400
     edge_max_rate: int = 40
     nuclei_rate: int = 50
+    nuclei_batch_size: int = 15
+    nuclei_batch_timeout_min: int = 40
     httpx_rate: int = 50
     use_amass: bool = True
+    tls_enum_ciphers: bool = True
     amass_timeout_min: int = 10
     quick_scan: bool = False
     top_ports: int | None = None
     min_apache: str = "2.4.65"
     min_nginx: str = "1.26.0"
     min_routeros: str = "7.15"
+
+    def has_secrets(self) -> bool:
+        return bool(self.shodan_api_key or self.hibp_api_key or self.intel_keys)
 
     @property
     def ownership_enforced(self) -> bool:
@@ -353,6 +369,12 @@ class ScopeConfig:
                       if flat.get("content_discovery_content_discovery") is not None
                       else flat.get("content_discovery"))
             ),
+            saas_exposure=_as_bool(flat.get("saas_exposure_enabled")),
+            saas_org_names=_split_list(flat.get("saas_exposure_org_names")),
+            use_misconfig_mapper=_as_bool(flat.get("saas_exposure_use_misconfig_mapper")),
+            misconfig_services=_split_list(flat.get("saas_exposure_misconfig_services")),
+            misconfig_templates=str(flat.get("saas_exposure_misconfig_templates") or "").strip(),
+            misconfig_delay_ms=int(flat.get("saas_exposure_misconfig_delay_ms") or 1000),
             content_discovery_wordlist=str(flat.get("content_discovery_wordlist") or "").strip(),
             content_discovery_rate=int(flat.get("content_discovery_rate") or 20),
             auto_discover_targets=auto_discover_targets,
@@ -367,6 +389,7 @@ class ScopeConfig:
             aws_inventory_file=aws_inventory_file,
             shodan_api_key=str(flat.get("shodan_api_key") or flat.get("shodan_key") or "").strip(),
             hibp_api_key=str(flat.get("hibp_api_key") or flat.get("hibp_key") or "").strip(),
+            intel_keys={k: str(flat[k]).strip() for k in INTEL_KEY_FIELDS if str(flat.get(k) or "").strip()},
             cloud_posture=cloud_posture,
             use_prowler=use_prowler,
             saas_posture=saas_posture,
@@ -377,6 +400,9 @@ class ScopeConfig:
             httpx_rate=int(flat.get("httpx_rate", 50)),
             use_amass=use_amass,
             amass_timeout_min=int(flat.get("amass_timeout_min", 10)),
+            nuclei_batch_size=int(flat.get("nuclei_batch_size") or 15),
+            nuclei_batch_timeout_min=int(flat.get("nuclei_batch_timeout_min") or 40),
+            tls_enum_ciphers=str(flat.get("tls_enum_ciphers", True)).strip().lower() not in ("0", "false", "no"),
             quick_scan=bool(flat.get("quick_scan", False) or flat.get("quick", False)),
             top_ports=int(flat["top_ports"]) if flat.get("top_ports") else None,
             min_apache=str(flat.get("min_apache", "2.4.65")),
@@ -412,6 +438,7 @@ class RunContext:
     quick_scan: bool = False
     top_ports: int | None = None
     explicit_phases: bool = False
+    resume: bool = False
 
     def __post_init__(self) -> None:
         if self.skip_cloud:
@@ -446,6 +473,8 @@ class RunContext:
                 return "no cloud provider configured in scope"
         if phase == "S" and not self.saas_posture:
             return "SaaS posture disabled"
+        if phase in EXPOSURE_PHASES and not self.explicit_phases and not getattr(self.scope, "saas_exposure", False):
+            return "SaaS exposure checks disabled"
         if phase in CONTENT_PHASES and not self.explicit_phases and not getattr(self.scope, "content_discovery", False):
             return "content discovery disabled"
         return ""
@@ -551,7 +580,8 @@ _SCOPE_SCHEMA: dict[str, tuple[str, ...]] = {
         "owned_ranges", "owned_ips_file", "auto_discover", "auto_discover_targets",
         "skip_portscan_orgs", "apex_trusted_orgs", "use_amass",
         "edge_ports", "edge_max_rate", "nmap_max_rate", "httpx_rate", "nuclei_rate",
-        "amass_timeout_min", "top_ports", "quick", "quick_scan",
+        "amass_timeout_min", "tls_enum_ciphers", "nuclei_batch_size", "nuclei_batch_timeout_min",
+        "top_ports", "quick", "quick_scan",
         "min_apache", "min_nginx", "min_routeros",
         "shodan_api_key", "shodan_key", "hibp_api_key", "hibp_key",
     ),
@@ -566,11 +596,14 @@ _SCOPE_SCHEMA: dict[str, tuple[str, ...]] = {
     "aws": ("profiles", "regions", "inventory_file"),
     "cloud_posture": ("cloud_posture", "enabled", "use_prowler", "prowler"),
     "saas": ("saas_posture", "providers"),
-    "intelligence": ("shodan_api_key", "shodan_key", "hibp_api_key", "hibp_key"),
+    "intelligence": ("shodan_api_key", "shodan_key", "hibp_api_key", "hibp_key", *INTEL_KEY_FIELDS),
+    "saas_exposure": ("enabled", "org_names", "use_misconfig_mapper", "misconfig_services",
+                      "misconfig_templates", "misconfig_delay_ms"),
     "content_discovery": ("content_discovery", "enabled", "wordlist", "rate",
                           "content_discovery_wordlist", "content_discovery_rate"),
     "limits": ("edge_max_rate", "nmap_max_rate", "httpx_rate", "nuclei_rate",
-               "amass_timeout_min", "top_ports", "edge_ports"),
+               "amass_timeout_min", "tls_enum_ciphers", "nuclei_batch_size", "nuclei_batch_timeout_min",
+               "top_ports", "edge_ports"),
     "thresholds": ("min_apache", "min_nginx", "min_routeros"),
 }
 
