@@ -8,6 +8,7 @@ across contoso.com, northwindtraders.com, and fabrikam.io.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -120,7 +121,22 @@ def build_sample_run(run_dir: Path) -> None:
         ("LOW", "m365-ca-report-only", "Conditional Access policies in report-only mode", "Policy CA003-LegacyAuthBlock configured in report-only mode (not enforced)"),
         ("INFO", "m365-mfa-compliance", "MFA compliance at 91%", "242 of 266 total licensed users in contoso.com tenant have registered MFA authentication methods"),
     ]
-    tsv_content = "".join(f"{s}\t{k}\t{t}\t{e}\n" for s, k, t, e in findings)
+    def _sample_target(key: str, evidence: str) -> str:
+        # Derive a finding target (IP, then hostname) from the key/evidence so the
+        # sample exercises asset grouping just like a real run's Target column.
+        for text in (key, evidence):
+            m = re.search(r"\b(\d{1,3}(?:\.\d{1,3}){3})\b", text)
+            if m:
+                return m.group(1)
+        m = re.search(r"\bhttps?://([a-z0-9.-]+)", evidence.lower())
+        if m:
+            return m.group(1)
+        m = re.search(r"\b([a-z0-9-]+\.[a-z0-9-]+\.[a-z]{2,})\b", (key + " " + evidence).lower())
+        return m.group(1) if m else ""
+
+    tsv_content = "".join(
+        f"{s}\t{k}\t{t}\t{e}\t{_sample_target(k, e)}\n" for s, k, t, e in findings
+    )
     (run_dir / "findings_auto.tsv").write_text(tsv_content, encoding="utf-8")
 
     # 5. findings_auto.md
