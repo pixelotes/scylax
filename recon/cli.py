@@ -28,6 +28,7 @@ from recon import checkpoint, redact
 from recon.deps import DependencyManager
 from recon.phases import PHASE_MAP, active, cloud, osint, saas, triage
 from recon.ai_bundle import report_from_bundle
+from recon.export import export_report_data
 from recon.report import generate_reports
 from recon.runner import DRY_RUN, TOOL_FAILURES_FILE, Logger, dry_run_active, dry_run_report, have, http_get, load_tool_failures, reset_phase_console
 from recon.resilience import BREAKERS
@@ -226,6 +227,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="rebuild report.md and report.html from an ai_bundle.md and exit",
     )
     parser.add_argument(
+        "--export",
+        metavar="DIR",
+        help="write report_data.json (consolidated assets + findings + relations, "
+             "the report-generator contract) for an existing run directory and exit",
+    )
+    parser.add_argument(
         "--no-venv",
         action="store_true",
         default=(os.environ.get("NO_VENV") == "1"),
@@ -397,6 +404,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             log.error(f"Could not rebuild report from bundle: {exc}")
             return 1
         log.ok(f"Reports rebuilt from bundle: {md_path} and {html_path}")
+        return 0
+
+    # 2c. Write the consolidated report_data.json for an existing run
+    if args.export:
+        export_dir = Path(args.export)
+        if not export_dir.is_dir():
+            log.error(f"Run directory not found: {export_dir}")
+            return 1
+        try:
+            out_path = export_report_data(export_dir)
+        except Exception as exc:
+            log.error(f"Could not export report data: {exc}")
+            return 1
+        log.ok(f"Exported report data: {out_path}")
         return 0
 
     print(BANNER)

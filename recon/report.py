@@ -3029,6 +3029,14 @@ def generate_reports(run_dir: Path | str) -> tuple[Path, Path]:
     html_path = path / "report.html"
     html_path.write_text(html_content, encoding="utf-8")
 
+    # Consolidated, versioned JSON — the stable contract for a downstream,
+    # human-curated report generator. A convenience; never fail reports over it.
+    try:
+        from recon.export import write_report_data
+        write_report_data(data, path)
+    except Exception:
+        pass
+
     # Compact, self-contained companion for LLM analysis / report regeneration.
     try:
         from recon.ai_bundle import build_ai_bundle

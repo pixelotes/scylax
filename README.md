@@ -347,7 +347,7 @@ Key settings in `scopes/example.toml`:
 ## Running it
 
 ```text
-./scylax.py -s SCOPE_FILE [--profile NAME] [-p "PHASES"] [-d DATE] [-P] [-q | -qq] [-n] [-y] [-D] [--no-venv] [--cloud-posture] [--saas-posture] [--prowler] [--check-deps] [--check-config] [--report-only DIR] [--report-from-bundle FILE]
+./scylax.py -s SCOPE_FILE [--profile NAME] [-p "PHASES"] [-d DATE] [-P] [-q | -qq] [-n] [-y] [-D] [--no-venv] [--cloud-posture] [--saas-posture] [--prowler] [--check-deps] [--check-config] [--report-only DIR] [--report-from-bundle FILE] [--export DIR]
 ```
 
 | Option | Meaning |
@@ -376,6 +376,7 @@ Key settings in `scopes/example.toml`:
 | `--check-config` | Validate the scope file (unknown keys, missing files, empty sections) and exit |
 | `--report-only DIR` | Regenerate `report.md` and `report.html` for an existing run folder |
 | `--report-from-bundle FILE` | Rebuild `report.md` and `report.html` from an `ai_bundle.md` alone |
+| `--export DIR` | Write `report_data.json` (consolidated assets + findings + relations) for an existing run and exit |
 
 ### Profiles (`--profile`)
 
@@ -473,6 +474,9 @@ runs/<scope>/<date>/
                            coverage gaps and every structured source file embedded (path-tagged);
                            console logs and huge dumps are left out to fit a model's context window.
                            Rebuild the reports from it with --report-from-bundle.
+  report_data.json         Consolidated, versioned export (schema_version): meta, KPIs, the asset inventory,
+                           every finding, and the explicit asset<->finding relations. The stable contract for a
+                           downstream report generator; written every run, regenerate alone with --export.
   findings_auto.md / .tsv  Prioritised finding candidates (Asset ID column, all affected assets; rows grouped by asset)
   findings.jsonl           The same candidates, one JSON object per line (status "candidate"), for trackers/scripts
   assets.jsonl             Hostnames, live web URLs and open TCP ports collected by the run
