@@ -18,6 +18,95 @@ CLOUD_PHASES: set[str] = {"A", "G", "W"}
 CONTENT_PHASES: set[str] = {"C"}
 EXPOSURE_PHASES: set[str] = {"E"}
 
+# Named phase-group presets. Each profile expands to a set of phases (phase T,
+# triage/reporting, is always appended) plus optional posture toggles. Naming a
+# profile makes its opt-in phases (cloud A/G/W, content C, SaaS exposure E, and —
+# via the toggle — SaaS posture S) run, exactly as naming them with -p would.
+# Selected with --profile / $PROFILE; an explicit -p always overrides the phases.
+PROFILES: Dict[str, dict] = {
+    # --- core (by footprint / perspective) ---
+    "passive": {
+        "phases": ["1", "2", "6", "7", "9"],
+        "desc": "Zero-touch OSINT: subdomains, DNS posture, historical URLs, Shodan/CVE, breaches & leaks. No active probing; no authorisation needed.",
+    },
+    "light": {
+        "phases": ["1", "2", "3", "5", "6", "7", "8", "9", "E"],
+        "desc": "Safe active recon: web probing, tech fingerprint, nuclei and anonymous SaaS exposure — no port scans (no nmap). Low footprint for frequent/CTEM runs.",
+    },
+    "external": {
+        "phases": ["1", "2", "3", "4", "4b", "5", "6", "7", "8", "9", "C", "E"],
+        "desc": "Full external attack surface (attacker's view): port scans, content discovery and path traversal. No cloud/SaaS credentials.",
+    },
+    "blueteam": {
+        "phases": ["1", "2", "6", "7", "9", "E", "A", "G", "W", "S"],
+        "cloud_posture": True,
+        "saas_posture": True,
+        "desc": "Defender posture: external exposure & leaks plus authenticated read-only posture of your own cloud (A/G/W) and SaaS (S) tenants. Minimal active scanning.",
+    },
+    "purpleteam": {
+        "phases": ["1", "2", "3", "4", "4b", "5", "6", "7", "8", "9", "A", "G", "W", "C", "E", "S"],
+        "cloud_posture": True,
+        "saas_posture": True,
+        "desc": "Everything: full external scanning plus cloud and SaaS posture. The complete offensive + defensive picture.",
+    },
+    "full": {
+        "phases": ["1", "2", "3", "4", "4b", "5", "6", "7", "8", "9", "A", "G", "W", "C", "E", "S"],
+        "cloud_posture": True,
+        "saas_posture": True,
+        "use_prowler": True,
+        "desc": "Maximum coverage: all phases, cloud & SaaS posture, and the deep Prowler CSPM scan.",
+    },
+    # --- focused ---
+    "web": {
+        "phases": ["2", "3", "5", "6", "8", "C"],
+        "desc": "Web-facing surface only: live hosts, tech, historical URLs, nuclei, content discovery and path traversal.",
+    },
+    "cloud": {
+        "phases": ["A", "G", "W"],
+        "cloud_posture": True,
+        "desc": "Cloud annexes only: Azure/GCP/AWS public-IP inventory, Internet-facing rules and posture checks.",
+    },
+    "intel": {
+        "phases": ["6", "7", "9"],
+        "desc": "Intelligence only: historical URLs, Shodan/CVE correlation, breaches and public-repo secret leaks.",
+    },
+    "saas": {
+        "phases": ["E", "S"],
+        "saas_posture": True,
+        "desc": "SaaS only: anonymous third-party exposure (E) plus authenticated M365/GitHub/Google posture (S).",
+    },
+}
+
+# Friendly aliases for the profile names above.
+PROFILE_ALIASES: Dict[str, str] = {
+    "osint": "passive",
+    "redteam": "external",
+    "attacker": "external",
+    "leaks": "intel",
+}
+
+_PHASE_ORDER: Dict[str, int] = {p: i for i, p in enumerate(DEFAULT_PHASES)}
+
+
+def profile_names() -> List[str]:
+    """All selectable profile names (canonical, not aliases), in definition order."""
+    return list(PROFILES.keys())
+
+
+def resolve_profile(name: str) -> dict:
+    """Return the profile config for a name or alias; raise KeyError if unknown."""
+    key = PROFILE_ALIASES.get(name.lower().strip(), name.lower().strip())
+    if key not in PROFILES:
+        raise KeyError(name)
+    return PROFILES[key]
+
+
+def profile_phases(name: str) -> List[str]:
+    """Expand a profile into its phase list in canonical order, T always last."""
+    cfg = resolve_profile(name)
+    phases = set(cfg["phases"]) | {"T"}
+    return sorted(phases, key=lambda p: _PHASE_ORDER.get(p, 999))
+
 
 def _split_list(val: object) -> List[str]:
     """Accept either a TOML list of strings or a whitespace/comma-separated string."""

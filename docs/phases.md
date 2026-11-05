@@ -9,7 +9,8 @@ the final phase (T) reads it all and produces the findings, diff, and reports.
 - **Active** — port scanning and service detection.
 
 Active phases need [authorization](usage.md#authorization-gate). Cloud (A/G/W),
-SaaS (S), and content discovery (C) are opt-in.
+SaaS posture (S), content discovery (C), and SaaS exposure (E) are opt-in. To run
+a ready-made group of phases, use a [profile](usage.md#profiles).
 
 | # | Phase | What it does | Tools | Mode |
 |---|---|---|---|---|
@@ -27,6 +28,7 @@ SaaS (S), and content discovery (C) are opt-in.
 | `G` | GCP annex (grey-box) | Inventories VM IPs, forwarding rules, and `0.0.0.0/0` VPC firewall rules, then two-pass `nmap` (+ optional posture) | `gcloud`, `nmap`, `prowler` | Active (opt-in) |
 | `W` | AWS annex (grey-box) | Inventories Elastic/EC2 IPs, ALBs, public RDS, and Internet-facing Security Groups, then two-pass `nmap` (+ optional posture) | `aws`, `nmap`, `prowler` | Active (opt-in) |
 | `C` | Content discovery | Checks for exposed control panels, API docs, source/config, backups, telemetry on owned hosts, plus signature-confirmed path traversal | `gobuster` (native fallback) | Active (opt-in) |
+| `E` | Third-party SaaS exposure | Anonymous, read-only checks against `<org>.atlassian.net` (Jira/Confluence Cloud): whether issues, projects, users, dashboards, spaces or pages answer without login. Only counts are kept, never record contents. Optional `misconfig-mapper` on the same exact names | native HTTP, optional `misconfig-mapper` | Active (opt-in) |
 | `S` | SaaS security posture | Authenticated read-only config audit of M365/Entra ID, GitHub org, Google Workspace | Graph API, `gh`, `gam` | Authenticated (opt-in) |
 | `T` | Triage, diff & reporting | Evaluates all outputs → `findings_auto.*`, `diff.md`, `report.md`, `report.html`, `ai_bundle.md` | Python stdlib | Offline |
 
