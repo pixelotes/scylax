@@ -473,7 +473,7 @@ runs/<scope>/<date>/
                            coverage gaps and every structured source file embedded (path-tagged);
                            console logs and huge dumps are left out to fit a model's context window.
                            Rebuild the reports from it with --report-from-bundle.
-  findings_auto.md / .tsv  Prioritised finding candidates (with an Asset ID column; rows grouped by asset)
+  findings_auto.md / .tsv  Prioritised finding candidates (Asset ID column, all affected assets; rows grouped by asset)
   findings.jsonl           The same candidates, one JSON object per line (status "candidate"), for trackers/scripts
   assets.jsonl             Hostnames, live web URLs and open TCP ports collected by the run
   assets.tsv               Asset inventory: id, type, label, key, product/version, open ports, findings and CVEs per asset

@@ -138,6 +138,21 @@ def nsg_ports(raw: str) -> str:
     return ",".join([single] if single else ranges)
 
 
+def _finding_asset_cell(f: dict) -> str:
+    """Findings-table Asset cell: the primary asset id as a jump link, plus a
+    compact '+N' (the rest in its tooltip) when a finding affects several assets."""
+    ids = f.get("asset_ids") or ([f["asset_id"]] if f.get("asset_id") else [])
+    if not ids:
+        return '<span class="muted">-</span>'
+    primary = ids[0]
+    cell = (f'<a class="asset-link" href="#" data-asset-id="{html.escape(primary)}">'
+            f'<code class="pill">{html.escape(primary)}</code></a>')
+    if len(ids) > 1:
+        rest = ", ".join(ids[1:])
+        cell += f' <span class="muted" title="also affects: {html.escape(rest)}">+{len(ids) - 1}</span>'
+    return cell
+
+
 def _target_html(target: str) -> str:
     """Finding target cell: URLs become links, anything else stays as code."""
     if not target:
@@ -884,7 +899,7 @@ def generate_markdown(data: RunData) -> str:
         lines.append("|---|---|---|---|---|---|")
         for f in data.findings:
             sev_badge = f"`{f['severity']}`"
-            asset_id = f"`{f['asset_id']}`" if f.get("asset_id") else "-"
+            asset_id = ", ".join(f"`{a}`" for a in f.get("asset_ids", [])) or "-"
             title = _escape_md_cell(f["title"])
             evidence = _escape_md_cell(f["evidence"])
             key = f"`{_escape_md_cell(f['key'])}`" if f["key"] else "-"
@@ -2022,9 +2037,9 @@ def generate_html(data: RunData) -> str:
               </tr>
             </thead>
             <tbody>
-              {"".join(f'''<tr class="finding-row" data-severity="{f['severity']}" data-asset="{html.escape(f.get('asset_id',''))}" data-text="{html.escape(f['title'].lower())} {html.escape(f.get('target', '').lower())} {html.escape(f['key'].lower())} {html.escape(f['evidence'].lower())} {html.escape(f.get('asset_id','').lower())}">
+              {"".join(f'''<tr class="finding-row" data-severity="{f['severity']}" data-asset="{html.escape(f.get('asset_id',''))}" data-text="{html.escape(f['title'].lower())} {html.escape(f.get('target', '').lower())} {html.escape(f['key'].lower())} {html.escape(f['evidence'].lower())} {html.escape(' '.join(f.get('asset_ids', [])).lower())}">
                 <td><span class="badge badge-{f['severity'].lower()}">{f['severity']}</span></td>
-                <td>{(f'<a class="asset-link" href="#" data-asset-id="' + html.escape(f['asset_id']) + '"><code class="pill">' + html.escape(f['asset_id']) + '</code></a>') if f.get('asset_id') else '<span class="muted">-</span>'}</td>
+                <td>{_finding_asset_cell(f)}</td>
                 <td><strong>{html.escape(f['title'])}</strong></td>
                 <td class="mono">{_target_html(f.get('target', ''))}</td>
                 <td class="mono"><code>{html.escape(f['evidence'])}</code></td>
