@@ -33,6 +33,7 @@ explicitly. See [phases.md](phases.md) for what each phase does.
 | `--check-config` | — | Validate the scope file and exit. |
 | `--report-only DIR` | — | Rebuild `report.md`/`.html` for an existing run and exit. |
 | `--report-from-bundle FILE` | — | Rebuild the reports from an `ai_bundle.md` and exit. |
+| `--export DIR` | — | Write `report_data.json` (assets + findings + relations) for an existing run and exit. |
 | `--no-venv` | `NO_VENV=1` | Don't create/use a managed `.venv`. |
 
 ## Selecting phases
@@ -153,7 +154,13 @@ python3 scylax.py --report-only runs/acme/2026-11-04
 
 # Rebuild the reports from just the AI bundle
 python3 scylax.py --report-from-bundle runs/acme/2026-11-04/ai_bundle.md
+
+# Write the consolidated report_data.json contract (assets + findings + relations)
+python3 scylax.py --export runs/acme/2026-11-04
 ```
+
+`report_data.json` is produced on every run too; `--export` just regenerates it on
+its own. See [outputs](outputs.md#the-consolidated-export-report_datajson) for the schema.
 
 ## Monthly runs (CTEM)
 
