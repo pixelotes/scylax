@@ -1590,6 +1590,22 @@ def generate_html(data: RunData) -> str:
     font-size: 0.72rem;
     letter-spacing: 0.04em;
   }}
+  th.sortable {{
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+    padding-right: 1.5rem;
+  }}
+  th.sortable:hover {{ color: #fff; background: #1a2438; }}
+  th.sortable::after {{
+    content: "\\2195";
+    position: absolute;
+    right: 0.55rem;
+    opacity: 0.3;
+    font-size: 0.85em;
+  }}
+  th.sortable[data-sort-dir="asc"]::after {{ content: "\\25B2"; opacity: 0.9; }}
+  th.sortable[data-sort-dir="desc"]::after {{ content: "\\25BC"; opacity: 0.9; }}
   td {{
     padding: 0.65rem 0.9rem;
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
@@ -2996,6 +3012,56 @@ def generate_html(data: RunData) -> str:
   }}
   wireTabSearch('web-search-input', 'tab-web');
   wireTabSearch('cloud-search-input', 'tab-cloud');
+
+  // --- Click-to-sort on every data table's column headers ---
+  const SEV_ORDER = {{ CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 }};
+  const NUM_RE = /^-?\\d+(\\.\\d+)?$/;
+
+  function makeSortable(table) {{
+    const head = table.tHead;
+    const body = table.tBodies[0];
+    if (!head || !body || !head.rows.length) return;
+    const headerRow = head.rows[head.rows.length - 1];
+    Array.from(headerRow.cells).forEach((th, idx) => {{
+      th.classList.add('sortable');
+      th.addEventListener('click', () => {{
+        const dir = th.getAttribute('data-sort-dir') === 'asc' ? 'desc' : 'asc';
+        Array.from(headerRow.cells).forEach(c => {{
+          if (c !== th) c.removeAttribute('data-sort-dir');
+        }});
+        th.setAttribute('data-sort-dir', dir);
+
+        const rows = Array.from(body.rows).filter(r => r.cells.length > idx);
+        const raw = rows.map(r => (r.cells[idx] ? r.cells[idx].textContent.trim() : ''));
+        const nonEmpty = raw.filter(v => v && v !== '-');
+        const isSev = nonEmpty.length > 0 && nonEmpty.every(v => v.toUpperCase() in SEV_ORDER);
+        const isNum = !isSev && nonEmpty.length > 0 &&
+                      nonEmpty.every(v => NUM_RE.test(v.replace(/,/g, '')));
+
+        function keyOf(v) {{
+          if (isSev) return SEV_ORDER[v.toUpperCase()];
+          if (isNum) return parseFloat(v.replace(/,/g, ''));
+          return v.toLowerCase();
+        }}
+
+        const factor = dir === 'asc' ? 1 : -1;
+        rows.sort((a, b) => {{
+          const va = (a.cells[idx] ? a.cells[idx].textContent.trim() : '');
+          const vb = (b.cells[idx] ? b.cells[idx].textContent.trim() : '');
+          const ea = (!va || va === '-'), eb = (!vb || vb === '-');
+          if (ea && eb) return 0;
+          if (ea) return 1;          // empties always sink to the bottom
+          if (eb) return -1;
+          const ka = keyOf(va), kb = keyOf(vb);
+          if (ka < kb) return -1 * factor;
+          if (ka > kb) return 1 * factor;
+          return 0;
+        }});
+        rows.forEach(r => body.appendChild(r));
+      }});
+    }});
+  }}
+  document.querySelectorAll('table').forEach(makeSortable);
 </script>
 
 </body>
