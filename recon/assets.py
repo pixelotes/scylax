@@ -50,26 +50,65 @@ def _is_ip(value: str) -> bool:
         return False
 
 
-def normalize_key(target: str) -> str:
-    """Reduce a finding target (IP, host or URL) to a bare asset key.
-
-    A URL becomes its hostname; a ``host:port`` loses the port; everything is
-    lower-cased. Multi-target cells (``a, b``) are keyed on their first entry.
-    """
-    if not target:
+def _norm_one(token: str) -> str:
+    """Reduce a single target token (IP, host or URL) to a bare asset key."""
+    t = token.strip()
+    if not t:
         return ""
-    first = target.split(",")[0].strip()
-    if "://" in first:
-        host = urlparse(first).hostname or ""
+    if "://" in t:
+        host = urlparse(t).hostname or ""
         if host:
             return host.lower()
-    first = first.rstrip("/")
+    t = t.rstrip("/")
     # strip a trailing :port when the left side is a host/IP, not a scheme
-    if first.count(":") == 1 and not _is_ip(first):
-        left, _, right = first.partition(":")
+    if t.count(":") == 1 and not _is_ip(t):
+        left, _, right = t.partition(":")
         if right.isdigit():
-            first = left
-    return first.lower()
+            t = left
+    return t.lower()
+
+
+def normalize_key(target: str) -> str:
+    """The primary asset key for a (possibly multi-)target cell (its first entry)."""
+    if not target:
+        return ""
+    return _norm_one(target.split(",")[0])
+
+
+def normalize_all(target: str) -> List[str]:
+    """Every distinct asset key referenced by a target cell.
+
+    A finding may name several targets (``a, b``) — a shared rule, a wildcard
+    cert, a CVE on a service present on several hosts — so it links to each.
+    """
+    keys: List[str] = []
+    for part in (target or "").split(","):
+        k = _norm_one(part)
+        if k and k not in keys:
+            keys.append(k)
+    return keys
+
+
+# Pseudo-assets: findings with no host/IP target (org- or tenant-level) are
+# grouped under one of these so they still carry a stable id and appear in the
+# inventory, instead of floating unassigned.
+PSEUDO_ORG_KEY = "(organization)"
+PSEUDO_TENANT_KEY = "(saas tenant)"
+_TENANT_MARKERS = (
+    "m365", "entra", "azuread", "aad", "office365", "o365", "github", "gh-", "gh_",
+    "google workspace", "workspace", "gam", "oauth", "mfa", "conditional access", "ca0",
+    "saas", "tenant", "breach", "hibp", "pwned", "leaked credential", "compromised account",
+    "guest user", "branch protection", "2fa", "secret scanning",
+)
+
+
+def _pseudo_for(finding: Dict[str, str]) -> tuple[str, str, str, str]:
+    """(key, prefix, type, label) of the pseudo-asset a target-less finding belongs to."""
+    blob = " ".join([finding.get("key", ""), finding.get("title", ""),
+                     finding.get("evidence", "")]).lower()
+    if any(m in blob for m in _TENANT_MARKERS):
+        return PSEUDO_TENANT_KEY, "TENANT", "SaaS tenant", "SaaS / identity tenants"
+    return PSEUDO_ORG_KEY, "ORG", "Organization", "Organization-wide findings"
 
 
 def _split_hosts(blob: str) -> List[str]:
@@ -153,9 +192,9 @@ def build_assets(data: Any) -> List[Dict[str, Any]]:
         a = assets.get(key)
         if a is None:
             a = {
-                "key": key, "is_ip": _is_ip(key), "is_web": False,
-                "names": set(), "ptr": "", "org": "", "cloud": "", "cloud_name": "",
-                "ports": {}, "services": set(), "products": set(),
+                "key": key, "is_ip": _is_ip(key), "is_web": False, "pseudo": False,
+                "label": "", "names": set(), "ptr": "", "org": "", "cloud": "",
+                "cloud_name": "", "ports": {}, "services": set(), "products": set(),
                 "cves": [], "findings": [],
             }
             assets[key] = a
@@ -212,17 +251,27 @@ def build_assets(data: Any) -> List[Dict[str, Any]]:
         if h.get("server"):
             a["products"].add(h["server"])
 
-    # Attach findings (creating asset entries for targets not otherwise seen).
+    # Attach findings to every asset they reference (many-to-many). A finding with
+    # no host/IP target is grouped under a TENANT/ORG pseudo-asset so it is still
+    # inventoried and carries a stable id.
     for f in getattr(data, "findings", []):
-        key = normalize_key(f.get("target", ""))
-        f["asset_key"] = key
+        keys = normalize_all(f.get("target", ""))
+        if not keys:
+            pk, pprefix, ptype, plabel = _pseudo_for(f)
+            a = get(pk)
+            a["pseudo"], a["prefix"], a["type"], a["label"] = True, pprefix, ptype, plabel
+            keys = [pk]
+        f["asset_keys"] = keys
+        f["asset_ids"] = []
         f["asset_id"] = ""
-        if key:
-            get(key)["findings"].append(f)
+        for k in keys:
+            get(k)["findings"].append(f)
 
-    # Classify, then assign stable ids in a deterministic (prefix, key) order.
+    # Classify real assets (pseudo-assets already have their type), then assign
+    # stable ids in a deterministic (prefix, key) order.
     for a in assets.values():
-        a["prefix"], a["type"] = _classify(a)
+        if not a.get("pseudo"):
+            a["prefix"], a["type"] = _classify(a)
 
     registry_path = Path(getattr(data, "run_dir")).parent / "assets.json"
     registry = AssetRegistry(registry_path)
@@ -232,8 +281,8 @@ def build_assets(data: Any) -> List[Dict[str, Any]]:
     registry.save()
 
     for f in getattr(data, "findings", []):
-        if f.get("asset_key"):
-            f["asset_id"] = assets[f["asset_key"]]["id"]
+        f["asset_ids"] = [assets[k]["id"] for k in f.get("asset_keys", [])]
+        f["asset_id"] = f["asset_ids"][0] if f["asset_ids"] else ""
 
     asset_list = sorted(
         assets.values(),
@@ -246,6 +295,8 @@ def build_assets(data: Any) -> List[Dict[str, Any]]:
 
 def asset_label(asset: Dict[str, Any]) -> str:
     """Best human label for an asset: cloud resource name, PTR, hostname, or key."""
+    if asset.get("label"):
+        return asset["label"]
     if asset.get("cloud_name"):
         return asset["cloud_name"]
     if asset.get("ptr"):

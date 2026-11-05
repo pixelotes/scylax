@@ -63,13 +63,20 @@ but the id never changes.
 
 An asset gathers everything known about it: reverse DNS / org, cloud resource
 name, open ports and services, product/versions, correlated CVEs, and the findings
-whose target points at it. Types are classified from that evidence:
+that reference it. Types are classified from that evidence:
 `ROUTER, FW, VPN, K8S, LB, MAIL, DB, DC, WEB, CLOUD, HOST, DOMAIN, ASSET`.
 
+**Asset ↔ finding is many-to-many.** A finding that names several targets (a
+shared rule, a wildcard cert, a CVE on a service present on several hosts) links
+to **every** asset it affects and appears under each in the inventory. A finding
+with no host/IP target (org- or tenant-level: M365/identity, breaches, DNS/mail
+posture) is grouped under a pseudo-asset — `TENANT-001` (SaaS / identity) or
+`ORG-001` (organization-wide) — so it is still inventoried and carries a stable id.
+
 - `assets.tsv` — the full inventory (one row per asset).
-- `findings_auto.*` carry an **Asset ID** column, and rows are **grouped by asset**
-  (assets ordered by their worst finding severity; org/tenant-level findings with
-  no asset keep their own severity rank).
+- `findings_auto.*` carry an **Asset ID** column (all affected ids) and rows are
+  **grouped by asset** (by the finding's primary asset; assets ordered by their
+  worst finding severity).
 
 ## The HTML dashboard (`report.html`)
 
@@ -82,8 +89,9 @@ Built for triage and forensics:
 - **Assets tab** — one row per asset (id, type, label + key, product/version, open
   ports, its findings as severity badges, and its CVEs) with a search box and a
   **type filter**.
-- **Findings grouped by asset**, each row showing its Asset ID; clicking the id
-  jumps to that asset's row in the Assets tab and highlights it.
+- **Findings grouped by asset**, each row showing its Asset ID (and `+N` when a
+  finding affects several assets); clicking the id jumps to that asset's row in the
+  Assets tab and highlights it.
 - **Clickable severity KPI cards** ("Critical 3" …) jump straight to the Findings
   tab filtered to that severity.
 - **Search boxes** on the findings, assets, hosts/CVEs, web, cloud and CLI tabs.

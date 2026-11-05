@@ -515,7 +515,7 @@
       Findings &amp; Weaknesses <span class="tab-badge">43</span>
     </button>
     <button class="nav-tab" data-tab="tab-assets">
-      Assets <span class="tab-badge">26</span>
+      Assets <span class="tab-badge">28</span>
     </button>
     <button class="nav-tab" data-tab="tab-hosts">
       Hosts, Services &amp; CVEs <span class="tab-badge">6</span>
@@ -743,13 +743,97 @@
                 <td class="mono"><code>203.0.113.45</code></td>
                 <td class="mono"><code>203.0.113.45:8291 MikroTik RouterOS 6.48.6 (RouterOS winbox)</code></td>
                 <td><code class="pill">routeros:203.0.113.45</code></td>
-              </tr><tr class="finding-row" data-severity="CRITICAL" data-asset="" data-text="2 global administrators without mfa registered  m365-admin-no-mfa accounts admin-backup@contoso.com, breakglass-svc@contoso.com have global admin role without mfa registered ">
+              </tr><tr class="finding-row" data-severity="CRITICAL" data-asset="TENANT-001" data-text="2 global administrators without mfa registered  m365-admin-no-mfa accounts admin-backup@contoso.com, breakglass-svc@contoso.com have global admin role without mfa registered tenant-001">
                 <td><span class="badge badge-critical">CRITICAL</span></td>
-                <td><span class="muted">-</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="TENANT-001"><code class="pill">TENANT-001</code></a></td>
                 <td><strong>2 Global Administrators without MFA registered</strong></td>
                 <td class="mono">-</td>
                 <td class="mono"><code>Accounts admin-backup@contoso.com, breakglass-svc@contoso.com have Global Admin role without MFA registered</code></td>
                 <td><code class="pill">m365-admin-no-mfa</code></td>
+              </tr><tr class="finding-row" data-severity="HIGH" data-asset="TENANT-001" data-text="conditional access without a policy requiring mfa for all users  m365-ca-no-mfa-all no active conditional access policy enforces mfa for all users across all cloud apps tenant-001">
+                <td><span class="badge badge-high">HIGH</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="TENANT-001"><code class="pill">TENANT-001</code></a></td>
+                <td><strong>Conditional Access without a policy requiring MFA for all users</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>No active Conditional Access policy enforces MFA for all users across all cloud apps</code></td>
+                <td><code class="pill">m365-ca-no-mfa-all</code></td>
+              </tr><tr class="finding-row" data-severity="HIGH" data-asset="TENANT-001" data-text="domain breach history: contoso marketing portal leak (2023-04-18)  hibp:contoso.com:contosomarketing2023 18400 accounts, exposed: email addresses;passwords;job titles tenant-001">
+                <td><span class="badge badge-high">HIGH</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="TENANT-001"><code class="pill">TENANT-001</code></a></td>
+                <td><strong>Domain breach history: Contoso Marketing Portal Leak (2023-04-18)</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>18400 accounts, exposed: Email addresses;Passwords;Job titles</code></td>
+                <td><code class="pill">hibp:contoso.com:ContosoMarketing2023</code></td>
+              </tr><tr class="finding-row" data-severity="HIGH" data-asset="TENANT-001" data-text="oauth grant with mail.readwrite to allprincipals  m365-oauth-allprincipals-mail delegated permission mail.readwrite consented for allprincipals scope on contosomailsyncapp tenant-001">
+                <td><span class="badge badge-high">HIGH</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="TENANT-001"><code class="pill">TENANT-001</code></a></td>
+                <td><strong>OAuth grant with Mail.ReadWrite to AllPrincipals</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>Delegated permission Mail.ReadWrite consented for AllPrincipals scope on ContosoMailSyncApp</code></td>
+                <td><code class="pill">m365-oauth-allprincipals-mail</code></td>
+              </tr><tr class="finding-row" data-severity="HIGH" data-asset="TENANT-001" data-text="open secret scanning alerts in organization repositories  gh-secret-scanning-alerts 2 unresolved secret scanning alerts in contoso-org/contoso-api tenant-001">
+                <td><span class="badge badge-high">HIGH</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="TENANT-001"><code class="pill">TENANT-001</code></a></td>
+                <td><strong>Open secret scanning alerts in organization repositories</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>2 unresolved secret scanning alerts in contoso-org/contoso-api</code></td>
+                <td><code class="pill">gh-secret-scanning-alerts</code></td>
+              </tr><tr class="finding-row" data-severity="HIGH" data-asset="TENANT-001" data-text="organization does not require 2fa for 3 members  gh-org-2fa-disabled 3 members without 2fa registered in contoso-org; two_factor_requirement_enabled=false tenant-001">
+                <td><span class="badge badge-high">HIGH</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="TENANT-001"><code class="pill">TENANT-001</code></a></td>
+                <td><strong>Organization does not require 2FA for 3 members</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>3 members without 2FA registered in contoso-org; two_factor_requirement_enabled=false</code></td>
+                <td><code class="pill">gh-org-2fa-disabled</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="TENANT-001" data-text="14 active guest users with access to tenant resources  m365-guest-users-active 14 external guest user accounts active; 4 have not signed in for over 180 days tenant-001">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="TENANT-001"><code class="pill">TENANT-001</code></a></td>
+                <td><strong>14 active guest users with access to tenant resources</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>14 external guest user accounts active; 4 have not signed in for over 180 days</code></td>
+                <td><code class="pill">m365-guest-users-active</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="TENANT-001" data-text="6 repos without branch protection  gh-repo-no-branch-protection repositories contoso-api, northwind-web, fabrikam-core, data-pipeline, devops-tools, staging-env lack default branch protection tenant-001">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="TENANT-001"><code class="pill">TENANT-001</code></a></td>
+                <td><strong>6 repos without branch protection</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>Repositories contoso-api, northwind-web, fabrikam-core, data-pipeline, devops-tools, staging-env lack default branch protection</code></td>
+                <td><code class="pill">gh-repo-no-branch-protection</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="TENANT-001" data-text="app registration secret expired  m365-app-secret-expired client secret for app contoso-crm-connector expired on 2026-10-15 tenant-001">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="TENANT-001"><code class="pill">TENANT-001</code></a></td>
+                <td><strong>App registration secret expired</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>Client secret for app contoso-crm-connector expired on 2026-10-15</code></td>
+                <td><code class="pill">m365-app-secret-expired</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="TENANT-001" data-text="domain breach history: northwind customer support leak (2022-11-05)  hibp:northwindtraders.com:northwindsupport2022 9350 accounts, exposed: email addresses;names;phone numbers tenant-001">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="TENANT-001"><code class="pill">TENANT-001</code></a></td>
+                <td><strong>Domain breach history: Northwind Customer Support Leak (2022-11-05)</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>9350 accounts, exposed: Email addresses;Names;Phone numbers</code></td>
+                <td><code class="pill">hibp:northwindtraders.com:NorthwindSupport2022</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="TENANT-001" data-text="stale user accounts inactive for &gt;90 days  m365-stale-accounts 8 enabled user accounts with lastsignindatetime older than 90 days tenant-001">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="TENANT-001"><code class="pill">TENANT-001</code></a></td>
+                <td><strong>Stale user accounts inactive for &gt;90 days</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>8 enabled user accounts with lastSignInDateTime older than 90 days</code></td>
+                <td><code class="pill">m365-stale-accounts</code></td>
+              </tr><tr class="finding-row" data-severity="LOW" data-asset="TENANT-001" data-text="conditional access policies in report-only mode  m365-ca-report-only policy ca003-legacyauthblock configured in report-only mode (not enforced) tenant-001">
+                <td><span class="badge badge-low">LOW</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="TENANT-001"><code class="pill">TENANT-001</code></a></td>
+                <td><strong>Conditional Access policies in report-only mode</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>Policy CA003-LegacyAuthBlock configured in report-only mode (not enforced)</code></td>
+                <td><code class="pill">m365-ca-report-only</code></td>
+              </tr><tr class="finding-row" data-severity="INFO" data-asset="TENANT-001" data-text="mfa compliance at 91%  m365-mfa-compliance 242 of 266 total licensed users in contoso.com tenant have registered mfa authentication methods tenant-001">
+                <td><span class="badge badge-info">INFO</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="TENANT-001"><code class="pill">TENANT-001</code></a></td>
+                <td><strong>MFA compliance at 91%</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>242 of 266 total licensed users in contoso.com tenant have registered MFA authentication methods</code></td>
+                <td><code class="pill">m365-mfa-compliance</code></td>
               </tr><tr class="finding-row" data-severity="HIGH" data-asset="FW-001" data-text="firewall / router admin gui on the internet 198.51.100.90 fw-admin:198.51.100.90 login | opnsense at https://198.51.100.90/ (port 443) fw-001">
                 <td><span class="badge badge-high">HIGH</span></td>
                 <td><a class="asset-link" href="#" data-asset-id="FW-001"><code class="pill">FW-001</code></a></td>
@@ -757,6 +841,118 @@
                 <td class="mono"><code>198.51.100.90</code></td>
                 <td class="mono"><code>Login | OPNsense at https://198.51.100.90/ (port 443)</code></td>
                 <td><code class="pill">fw-admin:198.51.100.90</code></td>
+              </tr><tr class="finding-row" data-severity="HIGH" data-asset="ORG-001" data-text="azure storage account stcontosoexports allows public blob access  az-storage-public:stcontosoexports rg-contoso-storage/stcontosoexports allowblobpublicaccess=true org-001">
+                <td><span class="badge badge-high">HIGH</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="ORG-001"><code class="pill">ORG-001</code></a></td>
+                <td><strong>Azure Storage Account stcontosoexports allows public blob access</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>rg-contoso-storage/stcontosoexports allowBlobPublicAccess=true</code></td>
+                <td><code class="pill">az-storage-public:stcontosoexports</code></td>
+              </tr><tr class="finding-row" data-severity="HIGH" data-asset="ORG-001" data-text="sensitive files in wayback history  wayback-critical 18 urls with config/sql/backup extensions org-001">
+                <td><span class="badge badge-high">HIGH</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="ORG-001"><code class="pill">ORG-001</code></a></td>
+                <td><strong>Sensitive files in Wayback history</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>18 URLs with config/sql/backup extensions</code></td>
+                <td><code class="pill">wayback-critical</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="ORG-001" data-text="azure sql server sql-contoso-erp has public network access enabled  az-sql-public:sql-contoso-erp rg-contoso-erp-prod/sql-contoso-erp publicnetworkaccess=enabled org-001">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="ORG-001"><code class="pill">ORG-001</code></a></td>
+                <td><strong>Azure SQL Server sql-contoso-erp has public network access enabled</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>rg-contoso-erp-prod/sql-contoso-erp publicNetworkAccess=Enabled</code></td>
+                <td><code class="pill">az-sql-public:sql-contoso-erp</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="ORG-001" data-text="azure storage account stnorthwindlogs allows unencrypted http traffic  az-storage-http:stnorthwindlogs rg-northwind-data/stnorthwindlogs supportshttpstrafficonly=false org-001">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="ORG-001"><code class="pill">ORG-001</code></a></td>
+                <td><strong>Azure Storage Account stnorthwindlogs allows unencrypted HTTP traffic</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>rg-northwind-data/stnorthwindlogs supportsHttpsTrafficOnly=false</code></td>
+                <td><code class="pill">az-storage-http:stnorthwindlogs</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="ORG-001" data-text="fabrikam.io has no dmarc p=reject  dmarc:fabrikam.io v=dmarc1; p=none; rua=mailto:dmarc@fabrikam.io org-001">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="ORG-001"><code class="pill">ORG-001</code></a></td>
+                <td><strong>fabrikam.io has no DMARC p=reject</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>v=DMARC1; p=none; rua=mailto:dmarc@fabrikam.io</code></td>
+                <td><code class="pill">dmarc:fabrikam.io</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="ORG-001" data-text="key vault kv-contoso-prod has purge protection disabled  az-kv-purge:kv-contoso-prod rg-contoso-security/kv-contoso-prod enablepurgeprotection=false org-001">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="ORG-001"><code class="pill">ORG-001</code></a></td>
+                <td><strong>Key Vault kv-contoso-prod has purge protection disabled</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>rg-contoso-security/kv-contoso-prod enablePurgeProtection=false</code></td>
+                <td><code class="pill">az-kv-purge:kv-contoso-prod</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="ORG-001" data-text="key vault kv-northwind-dev has purge protection disabled  az-kv-purge:kv-northwind-dev rg-northwind-security/kv-northwind-dev enablepurgeprotection=false org-001">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="ORG-001"><code class="pill">ORG-001</code></a></td>
+                <td><strong>Key Vault kv-northwind-dev has purge protection disabled</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>rg-northwind-security/kv-northwind-dev enablePurgeProtection=false</code></td>
+                <td><code class="pill">az-kv-purge:kv-northwind-dev</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="ORG-001" data-text="microsoft defender for cloud disabled (free tier) for sqlservers  az-defender-free:sqlservers pricingtier=free org-001">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="ORG-001"><code class="pill">ORG-001</code></a></td>
+                <td><strong>Microsoft Defender for Cloud disabled (Free tier) for SqlServers</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>pricingTier=Free</code></td>
+                <td><code class="pill">az-defender-free:SqlServers</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="ORG-001" data-text="microsoft defender for cloud disabled (free tier) for storageaccounts  az-defender-free:storageaccounts pricingtier=free org-001">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="ORG-001"><code class="pill">ORG-001</code></a></td>
+                <td><strong>Microsoft Defender for Cloud disabled (Free tier) for StorageAccounts</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>pricingTier=Free</code></td>
+                <td><code class="pill">az-defender-free:StorageAccounts</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="ORG-001" data-text="microsoft defender for cloud disabled (free tier) for virtualmachines  az-defender-free:virtualmachines pricingtier=free org-001">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="ORG-001"><code class="pill">ORG-001</code></a></td>
+                <td><strong>Microsoft Defender for Cloud disabled (Free tier) for VirtualMachines</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>pricingTier=Free</code></td>
+                <td><code class="pill">az-defender-free:VirtualMachines</code></td>
+              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="ORG-001" data-text="nsg allows 3389 from internet  nsg:nsg-contoso-erp-prod:allow-rdp-internet rg-contoso-erp-prod/nsg-contoso-erp-prod rule allow-rdp-internet (nics: nic-contoso-erp-01) org-001">
+                <td><span class="badge badge-medium">MEDIUM</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="ORG-001"><code class="pill">ORG-001</code></a></td>
+                <td><strong>NSG allows 3389 from Internet</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>rg-contoso-erp-prod/nsg-contoso-erp-prod rule Allow-RDP-Internet (nics: nic-contoso-erp-01)</code></td>
+                <td><code class="pill">nsg:nsg-contoso-erp-prod:Allow-RDP-Internet</code></td>
+              </tr><tr class="finding-row" data-severity="LOW" data-asset="ORG-001" data-text="azure storage account stcontosobackups uses legacy tls (tls1_1)  az-storage-tls:stcontosobackups rg-contoso-storage/stcontosobackups minimumtlsversion=tls1_1 org-001">
+                <td><span class="badge badge-low">LOW</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="ORG-001"><code class="pill">ORG-001</code></a></td>
+                <td><strong>Azure Storage Account stcontosobackups uses legacy TLS (TLS1_1)</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>rg-contoso-storage/stcontosobackups minimumTlsVersion=TLS1_1</code></td>
+                <td><code class="pill">az-storage-tls:stcontosobackups</code></td>
+              </tr><tr class="finding-row" data-severity="LOW" data-asset="ORG-001" data-text="azure storage account stnorthwindlogs uses legacy tls (tls1_0)  az-storage-tls:stnorthwindlogs rg-northwind-data/stnorthwindlogs minimumtlsversion=tls1_0 org-001">
+                <td><span class="badge badge-low">LOW</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="ORG-001"><code class="pill">ORG-001</code></a></td>
+                <td><strong>Azure Storage Account stnorthwindlogs uses legacy TLS (TLS1_0)</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>rg-northwind-data/stnorthwindlogs minimumTlsVersion=TLS1_0</code></td>
+                <td><code class="pill">az-storage-tls:stnorthwindlogs</code></td>
+              </tr><tr class="finding-row" data-severity="LOW" data-asset="ORG-001" data-text="dnssec unsigned on fabrikam.io  dnssec:fabrikam.io dig dnskey fabrikam.io org-001">
+                <td><span class="badge badge-low">LOW</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="ORG-001"><code class="pill">ORG-001</code></a></td>
+                <td><strong>DNSSEC unsigned on fabrikam.io</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>dig DNSKEY fabrikam.io</code></td>
+                <td><code class="pill">dnssec:fabrikam.io</code></td>
+              </tr><tr class="finding-row" data-severity="LOW" data-asset="ORG-001" data-text="no caa on fabrikam.io  caa:fabrikam.io dig caa fabrikam.io org-001">
+                <td><span class="badge badge-low">LOW</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="ORG-001"><code class="pill">ORG-001</code></a></td>
+                <td><strong>No CAA on fabrikam.io</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>dig CAA fabrikam.io</code></td>
+                <td><code class="pill">caa:fabrikam.io</code></td>
+              </tr><tr class="finding-row" data-severity="INFO" data-asset="ORG-001" data-text="multi-cloud attack surface perimeter mapped  perimeter:mapping 85 subdomains identified across 3 domains in aws, azure, gcp, and digitalocean org-001">
+                <td><span class="badge badge-info">INFO</span></td>
+                <td><a class="asset-link" href="#" data-asset-id="ORG-001"><code class="pill">ORG-001</code></a></td>
+                <td><strong>Multi-cloud attack surface perimeter mapped</strong></td>
+                <td class="mono">-</td>
+                <td class="mono"><code>85 subdomains identified across 3 domains in AWS, Azure, GCP, and DigitalOcean</code></td>
+                <td><code class="pill">perimeter:mapping</code></td>
               </tr><tr class="finding-row" data-severity="HIGH" data-asset="WEB-001" data-text="apache 2.4.49 path traversal &amp; rce cve-2021-41773 (cisa kev) 203.0.113.19 cve:203.0.113.19:cve-2021-41773 203.0.113.19:80 apache/2.4.49 (unix) mod_ssl/2.4.49 web-001">
                 <td><span class="badge badge-high">HIGH</span></td>
                 <td><a class="asset-link" href="#" data-asset-id="WEB-001"><code class="pill">WEB-001</code></a></td>
@@ -785,55 +981,6 @@
                 <td class="mono"><code>files.northwindtraders.com</code></td>
                 <td class="mono"><code>https://files.northwindtraders.com/exports/ (Index of /exports)</code></td>
                 <td><code class="pill">dirlist:https://files.northwindtraders.com/exports/</code></td>
-              </tr><tr class="finding-row" data-severity="HIGH" data-asset="" data-text="azure storage account stcontosoexports allows public blob access  az-storage-public:stcontosoexports rg-contoso-storage/stcontosoexports allowblobpublicaccess=true ">
-                <td><span class="badge badge-high">HIGH</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>Azure Storage Account stcontosoexports allows public blob access</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>rg-contoso-storage/stcontosoexports allowBlobPublicAccess=true</code></td>
-                <td><code class="pill">az-storage-public:stcontosoexports</code></td>
-              </tr><tr class="finding-row" data-severity="HIGH" data-asset="" data-text="organization does not require 2fa for 3 members  gh-org-2fa-disabled 3 members without 2fa registered in contoso-org; two_factor_requirement_enabled=false ">
-                <td><span class="badge badge-high">HIGH</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>Organization does not require 2FA for 3 members</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>3 members without 2FA registered in contoso-org; two_factor_requirement_enabled=false</code></td>
-                <td><code class="pill">gh-org-2fa-disabled</code></td>
-              </tr><tr class="finding-row" data-severity="HIGH" data-asset="" data-text="open secret scanning alerts in organization repositories  gh-secret-scanning-alerts 2 unresolved secret scanning alerts in contoso-org/contoso-api ">
-                <td><span class="badge badge-high">HIGH</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>Open secret scanning alerts in organization repositories</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>2 unresolved secret scanning alerts in contoso-org/contoso-api</code></td>
-                <td><code class="pill">gh-secret-scanning-alerts</code></td>
-              </tr><tr class="finding-row" data-severity="HIGH" data-asset="" data-text="domain breach history: contoso marketing portal leak (2023-04-18)  hibp:contoso.com:contosomarketing2023 18400 accounts, exposed: email addresses;passwords;job titles ">
-                <td><span class="badge badge-high">HIGH</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>Domain breach history: Contoso Marketing Portal Leak (2023-04-18)</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>18400 accounts, exposed: Email addresses;Passwords;Job titles</code></td>
-                <td><code class="pill">hibp:contoso.com:ContosoMarketing2023</code></td>
-              </tr><tr class="finding-row" data-severity="HIGH" data-asset="" data-text="conditional access without a policy requiring mfa for all users  m365-ca-no-mfa-all no active conditional access policy enforces mfa for all users across all cloud apps ">
-                <td><span class="badge badge-high">HIGH</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>Conditional Access without a policy requiring MFA for all users</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>No active Conditional Access policy enforces MFA for all users across all cloud apps</code></td>
-                <td><code class="pill">m365-ca-no-mfa-all</code></td>
-              </tr><tr class="finding-row" data-severity="HIGH" data-asset="" data-text="oauth grant with mail.readwrite to allprincipals  m365-oauth-allprincipals-mail delegated permission mail.readwrite consented for allprincipals scope on contosomailsyncapp ">
-                <td><span class="badge badge-high">HIGH</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>OAuth grant with Mail.ReadWrite to AllPrincipals</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>Delegated permission Mail.ReadWrite consented for AllPrincipals scope on ContosoMailSyncApp</code></td>
-                <td><code class="pill">m365-oauth-allprincipals-mail</code></td>
-              </tr><tr class="finding-row" data-severity="HIGH" data-asset="" data-text="sensitive files in wayback history  wayback-critical 18 urls with config/sql/backup extensions ">
-                <td><span class="badge badge-high">HIGH</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>Sensitive files in Wayback history</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>18 URLs with config/sql/backup extensions</code></td>
-                <td><code class="pill">wayback-critical</code></td>
               </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="ASSET-001" data-text="fabrikam.io apex resolves to infrastructure not in our inventory 192.0.2.77 apex:fabrikam.io 192.0.2.77 (digitalocean, llc) asset-001">
                 <td><span class="badge badge-medium">MEDIUM</span></td>
                 <td><a class="asset-link" href="#" data-asset-id="ASSET-001"><code class="pill">ASSET-001</code></a></td>
@@ -869,104 +1016,6 @@
                 <td class="mono"><code>198.51.100.15</code></td>
                 <td class="mono"><code>vpn-internal.contoso.com -&gt; 198.51.100.15</code></td>
                 <td><code class="pill">internal-name:vpn-internal.contoso.com</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="microsoft defender for cloud disabled (free tier) for sqlservers  az-defender-free:sqlservers pricingtier=free ">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>Microsoft Defender for Cloud disabled (Free tier) for SqlServers</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>pricingTier=Free</code></td>
-                <td><code class="pill">az-defender-free:SqlServers</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="microsoft defender for cloud disabled (free tier) for storageaccounts  az-defender-free:storageaccounts pricingtier=free ">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>Microsoft Defender for Cloud disabled (Free tier) for StorageAccounts</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>pricingTier=Free</code></td>
-                <td><code class="pill">az-defender-free:StorageAccounts</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="microsoft defender for cloud disabled (free tier) for virtualmachines  az-defender-free:virtualmachines pricingtier=free ">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>Microsoft Defender for Cloud disabled (Free tier) for VirtualMachines</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>pricingTier=Free</code></td>
-                <td><code class="pill">az-defender-free:VirtualMachines</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="key vault kv-contoso-prod has purge protection disabled  az-kv-purge:kv-contoso-prod rg-contoso-security/kv-contoso-prod enablepurgeprotection=false ">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>Key Vault kv-contoso-prod has purge protection disabled</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>rg-contoso-security/kv-contoso-prod enablePurgeProtection=false</code></td>
-                <td><code class="pill">az-kv-purge:kv-contoso-prod</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="key vault kv-northwind-dev has purge protection disabled  az-kv-purge:kv-northwind-dev rg-northwind-security/kv-northwind-dev enablepurgeprotection=false ">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>Key Vault kv-northwind-dev has purge protection disabled</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>rg-northwind-security/kv-northwind-dev enablePurgeProtection=false</code></td>
-                <td><code class="pill">az-kv-purge:kv-northwind-dev</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="azure sql server sql-contoso-erp has public network access enabled  az-sql-public:sql-contoso-erp rg-contoso-erp-prod/sql-contoso-erp publicnetworkaccess=enabled ">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>Azure SQL Server sql-contoso-erp has public network access enabled</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>rg-contoso-erp-prod/sql-contoso-erp publicNetworkAccess=Enabled</code></td>
-                <td><code class="pill">az-sql-public:sql-contoso-erp</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="azure storage account stnorthwindlogs allows unencrypted http traffic  az-storage-http:stnorthwindlogs rg-northwind-data/stnorthwindlogs supportshttpstrafficonly=false ">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>Azure Storage Account stnorthwindlogs allows unencrypted HTTP traffic</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>rg-northwind-data/stnorthwindlogs supportsHttpsTrafficOnly=false</code></td>
-                <td><code class="pill">az-storage-http:stnorthwindlogs</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="fabrikam.io has no dmarc p=reject  dmarc:fabrikam.io v=dmarc1; p=none; rua=mailto:dmarc@fabrikam.io ">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>fabrikam.io has no DMARC p=reject</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>v=DMARC1; p=none; rua=mailto:dmarc@fabrikam.io</code></td>
-                <td><code class="pill">dmarc:fabrikam.io</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="6 repos without branch protection  gh-repo-no-branch-protection repositories contoso-api, northwind-web, fabrikam-core, data-pipeline, devops-tools, staging-env lack default branch protection ">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>6 repos without branch protection</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>Repositories contoso-api, northwind-web, fabrikam-core, data-pipeline, devops-tools, staging-env lack default branch protection</code></td>
-                <td><code class="pill">gh-repo-no-branch-protection</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="domain breach history: northwind customer support leak (2022-11-05)  hibp:northwindtraders.com:northwindsupport2022 9350 accounts, exposed: email addresses;names;phone numbers ">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>Domain breach history: Northwind Customer Support Leak (2022-11-05)</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>9350 accounts, exposed: Email addresses;Names;Phone numbers</code></td>
-                <td><code class="pill">hibp:northwindtraders.com:NorthwindSupport2022</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="app registration secret expired  m365-app-secret-expired client secret for app contoso-crm-connector expired on 2026-10-15 ">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>App registration secret expired</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>Client secret for app contoso-crm-connector expired on 2026-10-15</code></td>
-                <td><code class="pill">m365-app-secret-expired</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="14 active guest users with access to tenant resources  m365-guest-users-active 14 external guest user accounts active; 4 have not signed in for over 180 days ">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>14 active guest users with access to tenant resources</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>14 external guest user accounts active; 4 have not signed in for over 180 days</code></td>
-                <td><code class="pill">m365-guest-users-active</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="stale user accounts inactive for &gt;90 days  m365-stale-accounts 8 enabled user accounts with lastsignindatetime older than 90 days ">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>Stale user accounts inactive for &gt;90 days</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>8 enabled user accounts with lastSignInDateTime older than 90 days</code></td>
-                <td><code class="pill">m365-stale-accounts</code></td>
-              </tr><tr class="finding-row" data-severity="MEDIUM" data-asset="" data-text="nsg allows 3389 from internet  nsg:nsg-contoso-erp-prod:allow-rdp-internet rg-contoso-erp-prod/nsg-contoso-erp-prod rule allow-rdp-internet (nics: nic-contoso-erp-01) ">
-                <td><span class="badge badge-medium">MEDIUM</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>NSG allows 3389 from Internet</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>rg-contoso-erp-prod/nsg-contoso-erp-prod rule Allow-RDP-Internet (nics: nic-contoso-erp-01)</code></td>
-                <td><code class="pill">nsg:nsg-contoso-erp-prod:Allow-RDP-Internet</code></td>
               </tr><tr class="finding-row" data-severity="LOW" data-asset="WEB-010" data-text="public website missing security headers www.contoso.com headers:www https://www.contoso.com: permissions-policy x-content-type-options web-010">
                 <td><span class="badge badge-low">LOW</span></td>
                 <td><a class="asset-link" href="#" data-asset-id="WEB-010"><code class="pill">WEB-010</code></a></td>
@@ -974,55 +1023,6 @@
                 <td class="mono"><code>www.contoso.com</code></td>
                 <td class="mono"><code>https://www.contoso.com: permissions-policy x-content-type-options</code></td>
                 <td><code class="pill">headers:www</code></td>
-              </tr><tr class="finding-row" data-severity="LOW" data-asset="" data-text="azure storage account stcontosobackups uses legacy tls (tls1_1)  az-storage-tls:stcontosobackups rg-contoso-storage/stcontosobackups minimumtlsversion=tls1_1 ">
-                <td><span class="badge badge-low">LOW</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>Azure Storage Account stcontosobackups uses legacy TLS (TLS1_1)</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>rg-contoso-storage/stcontosobackups minimumTlsVersion=TLS1_1</code></td>
-                <td><code class="pill">az-storage-tls:stcontosobackups</code></td>
-              </tr><tr class="finding-row" data-severity="LOW" data-asset="" data-text="azure storage account stnorthwindlogs uses legacy tls (tls1_0)  az-storage-tls:stnorthwindlogs rg-northwind-data/stnorthwindlogs minimumtlsversion=tls1_0 ">
-                <td><span class="badge badge-low">LOW</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>Azure Storage Account stnorthwindlogs uses legacy TLS (TLS1_0)</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>rg-northwind-data/stnorthwindlogs minimumTlsVersion=TLS1_0</code></td>
-                <td><code class="pill">az-storage-tls:stnorthwindlogs</code></td>
-              </tr><tr class="finding-row" data-severity="LOW" data-asset="" data-text="no caa on fabrikam.io  caa:fabrikam.io dig caa fabrikam.io ">
-                <td><span class="badge badge-low">LOW</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>No CAA on fabrikam.io</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>dig CAA fabrikam.io</code></td>
-                <td><code class="pill">caa:fabrikam.io</code></td>
-              </tr><tr class="finding-row" data-severity="LOW" data-asset="" data-text="dnssec unsigned on fabrikam.io  dnssec:fabrikam.io dig dnskey fabrikam.io ">
-                <td><span class="badge badge-low">LOW</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>DNSSEC unsigned on fabrikam.io</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>dig DNSKEY fabrikam.io</code></td>
-                <td><code class="pill">dnssec:fabrikam.io</code></td>
-              </tr><tr class="finding-row" data-severity="LOW" data-asset="" data-text="conditional access policies in report-only mode  m365-ca-report-only policy ca003-legacyauthblock configured in report-only mode (not enforced) ">
-                <td><span class="badge badge-low">LOW</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>Conditional Access policies in report-only mode</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>Policy CA003-LegacyAuthBlock configured in report-only mode (not enforced)</code></td>
-                <td><code class="pill">m365-ca-report-only</code></td>
-              </tr><tr class="finding-row" data-severity="INFO" data-asset="" data-text="mfa compliance at 91%  m365-mfa-compliance 242 of 266 total licensed users in contoso.com tenant have registered mfa authentication methods ">
-                <td><span class="badge badge-info">INFO</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>MFA compliance at 91%</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>242 of 266 total licensed users in contoso.com tenant have registered MFA authentication methods</code></td>
-                <td><code class="pill">m365-mfa-compliance</code></td>
-              </tr><tr class="finding-row" data-severity="INFO" data-asset="" data-text="multi-cloud attack surface perimeter mapped  perimeter:mapping 85 subdomains identified across 3 domains in aws, azure, gcp, and digitalocean ">
-                <td><span class="badge badge-info">INFO</span></td>
-                <td><span class="muted">-</span></td>
-                <td><strong>Multi-cloud attack surface perimeter mapped</strong></td>
-                <td class="mono">-</td>
-                <td class="mono"><code>85 subdomains identified across 3 domains in AWS, Azure, GCP, and DigitalOcean</code></td>
-                <td><code class="pill">perimeter:mapping</code></td>
               </tr>
             </tbody>
           </table>
@@ -1044,8 +1044,8 @@
       <div class="card-body">
         <div class="filter-bar">
           <select class="search-input" id="asset-type-filter" style="max-width: 220px;">
-            <option value="ALL">All types (26)</option>
-            <option value="Asset">Asset</option><option value="Cloud host">Cloud host</option><option value="Domain / name">Domain / name</option><option value="Firewall">Firewall</option><option value="Kubernetes ingress">Kubernetes ingress</option><option value="Load balancer">Load balancer</option><option value="Mail server">Mail server</option><option value="Router">Router</option><option value="VPN gateway">VPN gateway</option><option value="Web service">Web service</option>
+            <option value="ALL">All types (28)</option>
+            <option value="Asset">Asset</option><option value="Cloud host">Cloud host</option><option value="Domain / name">Domain / name</option><option value="Firewall">Firewall</option><option value="Kubernetes ingress">Kubernetes ingress</option><option value="Load balancer">Load balancer</option><option value="Mail server">Mail server</option><option value="Organization">Organization</option><option value="Router">Router</option><option value="SaaS tenant">SaaS tenant</option><option value="VPN gateway">VPN gateway</option><option value="Web service">Web service</option>
           </select>
           <input type="text" class="search-input" id="asset-search-input" placeholder="Search id, type, name, IP, product, port, finding, CVE...">
         </div>
@@ -1063,7 +1063,7 @@
               </tr>
             </thead>
             <tbody>
-              <tr class="asset-row" id="asset-CLOUD-002" data-type="Cloud host" data-text="cloud-002 cloud host pip-vm-erp-legacy 198.51.100.52 ms-wbt-server microsoft terminal services 3389/ms-wbt-server management / legacy service ms-wbt-server exposed remote desktop services rce cve-2024-38077 (cisa kev) cve-2024-38077"><td><code class="pill pill-critical">CLOUD-002</code></td><td><span class="badge badge-info">Cloud host</span></td><td><strong>pip-vm-erp-legacy</strong><br><span class="mono muted">198.51.100.52</span></td><td class="mono">ms-wbt-server Microsoft Terminal Services</td><td class="mono">3389/ms-wbt-server</td><td><span class="badge badge-critical" title="Management / legacy service ms-wbt-server exposed">Management / legacy service ms-wbt-server exposed</span> <span class="badge badge-critical" title="Remote Desktop Services RCE CVE-2024-38077 (CISA KEV)">Remote Desktop Services RCE CVE-2024-38077 (CISA KEV)</span> </td><td><span class="mono">CVE-2024-38077</span> <span class="badge badge-kev">KEV</span></td></tr><tr class="asset-row" id="asset-ROUTER-001" data-type="Router" data-text="router-001 router branch-gw45.northwind.net 203.0.113.45 winbox mikrotik routeros 6.48.6 8291/winbox end-of-life routeros 6.48.6 on branch office edge gateway cve-2023-32154"><td><code class="pill pill-critical">ROUTER-001</code></td><td><span class="badge badge-info">Router</span></td><td><strong>branch-gw45.northwind.net</strong><br><span class="mono muted">203.0.113.45</span></td><td class="mono">winbox MikroTik RouterOS 6.48.6</td><td class="mono">8291/winbox</td><td><span class="badge badge-critical" title="End-of-life RouterOS 6.48.6 on branch office edge gateway">End-of-life RouterOS 6.48.6 on branch office edge gateway</span> </td><td><span class="mono">CVE-2023-32154</span></td></tr><tr class="asset-row" id="asset-FW-001" data-type="Firewall" data-text="fw-001 firewall edge-fw01.contoso.com 198.51.100.90 http opnsense 23.7.1, lighttpd/1.4.69 443/http firewall / router admin gui on the internet cve-2023-43261"><td><code class="pill pill-high">FW-001</code></td><td><span class="badge badge-info">Firewall</span></td><td><strong>edge-fw01.contoso.com</strong><br><span class="mono muted">198.51.100.90</span></td><td class="mono">http OPNsense 23.7.1, lighttpd/1.4.69</td><td class="mono">443/http</td><td><span class="badge badge-high" title="Firewall / router admin GUI on the internet">Firewall / router admin GUI on the internet</span> </td><td><span class="mono">CVE-2023-43261</span></td></tr><tr class="asset-row" id="asset-WEB-001" data-type="Web service" data-text="web-001 web service ec2-legacy-app.aws.com 203.0.113.19 http apache httpd 2.4.49 80/http apache 2.4.49 path traversal &amp; rce cve-2021-41773 (cisa kev) cve-2021-41773"><td><code class="pill pill-high">WEB-001</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>ec2-legacy-app.aws.com</strong><br><span class="mono muted">203.0.113.19</span></td><td class="mono">http Apache httpd 2.4.49</td><td class="mono">80/http</td><td><span class="badge badge-high" title="Apache 2.4.49 Path Traversal &amp; RCE CVE-2021-41773 (CISA KEV)">Apache 2.4.49 Path Traversal &amp; RCE CVE-2021-41773 (CISA KEV)</span> </td><td><span class="mono">CVE-2021-41773</span> <span class="badge badge-kev">KEV</span></td></tr><tr class="asset-row" id="asset-WEB-002" data-type="Web service" data-text="web-002 web service api-staging.northwindtraders.com api-staging.northwindtraders.com apache/2.4.49 - exposed openapi / swagger specification "><td><code class="pill pill-high">WEB-002</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>api-staging.northwindtraders.com</strong><br><span class="mono muted">api-staging.northwindtraders.com</span></td><td class="mono">Apache/2.4.49</td><td class="mono">-</td><td><span class="badge badge-high" title="Exposed OpenAPI / Swagger specification">Exposed OpenAPI / Swagger specification</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-004" data-type="Web service" data-text="web-004 web service dev-portal.fabrikam.io dev-portal.fabrikam.io nginx/1.22.1 - exposed environment configuration (.env) "><td><code class="pill pill-high">WEB-004</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>dev-portal.fabrikam.io</strong><br><span class="mono muted">dev-portal.fabrikam.io</span></td><td class="mono">nginx/1.22.1</td><td class="mono">-</td><td><span class="badge badge-high" title="Exposed environment configuration (.env)">Exposed environment configuration (.env)</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-006" data-type="Web service" data-text="web-006 web service files.northwindtraders.com files.northwindtraders.com apache/2.4.52 - unauthenticated directory listing "><td><code class="pill pill-high">WEB-006</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>files.northwindtraders.com</strong><br><span class="mono muted">files.northwindtraders.com</span></td><td class="mono">Apache/2.4.52</td><td class="mono">-</td><td><span class="badge badge-high" title="Unauthenticated directory listing">Unauthenticated directory listing</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-ASSET-001" data-type="Asset" data-text="asset-001 asset droplet-untracked-77.do.net 192.0.2.77 - - fabrikam.io apex resolves to infrastructure not in our inventory "><td><code class="pill pill-medium">ASSET-001</code></td><td><span class="badge badge-info">Asset</span></td><td><strong>droplet-untracked-77.do.net</strong><br><span class="mono muted">192.0.2.77</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="badge badge-medium" title="fabrikam.io apex resolves to infrastructure not in our inventory">fabrikam.io apex resolves to infrastructure not in our inventory</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-ASSET-002" data-type="Asset" data-text="asset-002 asset 0.0.0.0 0.0.0.0 - - gcp firewall allows tcp:22 from internet "><td><code class="pill pill-medium">ASSET-002</code></td><td><span class="badge badge-info">Asset</span></td><td><strong>0.0.0.0</strong><br><span class="mono muted">0.0.0.0</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="badge badge-medium" title="GCP firewall allows tcp:22 from Internet">GCP firewall allows tcp:22 from Internet</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-DOMAIN-001" data-type="Domain / name" data-text="domain-001 domain / name ci.contoso.com ci.contoso.com - - webhook without ssl verification "><td><code class="pill pill-medium">DOMAIN-001</code></td><td><span class="badge badge-info">Domain / name</span></td><td><strong>ci.contoso.com</strong><br><span class="mono muted">ci.contoso.com</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="badge badge-medium" title="Webhook without SSL verification">Webhook without SSL verification</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-K8S-003" data-type="Kubernetes ingress" data-text="k8s-003 kubernetes ingress pip-shop-frontend-lb 203.0.113.88 http nginx 1.20.1, nginx/1.20.1 443/http expired tls certificate cve-2021-23017"><td><code class="pill pill-medium">K8S-003</code></td><td><span class="badge badge-info">Kubernetes ingress</span></td><td><strong>pip-shop-frontend-lb</strong><br><span class="mono muted">203.0.113.88</span></td><td class="mono">http nginx 1.20.1, nginx/1.20.1</td><td class="mono">443/http</td><td><span class="badge badge-medium" title="Expired TLS certificate">Expired TLS certificate</span> </td><td><span class="mono">CVE-2021-23017</span></td></tr><tr class="asset-row" id="asset-VPN-001" data-type="VPN gateway" data-text="vpn-001 vpn gateway pip-contoso-vpn-gw 198.51.100.15 - - internal-named host publicly resolvable "><td><code class="pill pill-medium">VPN-001</code></td><td><span class="badge badge-info">VPN gateway</span></td><td><strong>pip-contoso-vpn-gw</strong><br><span class="mono muted">198.51.100.15</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="badge badge-medium" title="Internal-named host publicly resolvable">Internal-named host publicly resolvable</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-010" data-type="Web service" data-text="web-010 web service www.contoso.com www.contoso.com microsoft-iis/10.0 - public website missing security headers "><td><code class="pill pill-low">WEB-010</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>www.contoso.com</strong><br><span class="mono muted">www.contoso.com</span></td><td class="mono">Microsoft-IIS/10.0</td><td class="mono">-</td><td><span class="badge badge-low" title="Public website missing security headers">Public website missing security headers</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-CLOUD-001" data-type="Cloud host" data-text="cloud-001 cloud host pip-contoso-apim-prod 198.51.100.102 - -  "><td><code class="pill pill-info">CLOUD-001</code></td><td><span class="badge badge-info">Cloud host</span></td><td><strong>pip-contoso-apim-prod</strong><br><span class="mono muted">198.51.100.102</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-CLOUD-003" data-type="Cloud host" data-text="cloud-003 cloud host pip-dataflow-worker 203.0.113.140 - -  "><td><code class="pill pill-info">CLOUD-003</code></td><td><span class="badge badge-info">Cloud host</span></td><td><strong>pip-dataflow-worker</strong><br><span class="mono muted">203.0.113.140</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-CLOUD-004" data-type="Cloud host" data-text="cloud-004 cloud host pip-analytics-bastion 203.0.113.92 - -  "><td><code class="pill pill-info">CLOUD-004</code></td><td><span class="badge badge-info">Cloud host</span></td><td><strong>pip-analytics-bastion</strong><br><span class="mono muted">203.0.113.92</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-K8S-001" data-type="Kubernetes ingress" data-text="k8s-001 kubernetes ingress pip-contoso-aks-ingress 198.51.100.75 - -  "><td><code class="pill pill-info">K8S-001</code></td><td><span class="badge badge-info">Kubernetes ingress</span></td><td><strong>pip-contoso-aks-ingress</strong><br><span class="mono muted">198.51.100.75</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-K8S-002" data-type="Kubernetes ingress" data-text="k8s-002 kubernetes ingress pip-gke-ingress-cl1 203.0.113.115 - -  "><td><code class="pill pill-info">K8S-002</code></td><td><span class="badge badge-info">Kubernetes ingress</span></td><td><strong>pip-gke-ingress-cl1</strong><br><span class="mono muted">203.0.113.115</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-LB-001" data-type="Load balancer" data-text="lb-001 load balancer pip-contoso-erp-prod-01 198.51.100.10 http openssl 1.1.1k 443/http  cve-2022-0778"><td><code class="pill pill-info">LB-001</code></td><td><span class="badge badge-info">Load balancer</span></td><td><strong>pip-contoso-erp-prod-01</strong><br><span class="mono muted">198.51.100.10</span></td><td class="mono">http OpenSSL 1.1.1k</td><td class="mono">443/http</td><td><span class="muted">none</span></td><td><span class="mono">CVE-2022-0778</span></td></tr><tr class="asset-row" id="asset-MAIL-001" data-type="Mail server" data-text="mail-001 mail server pip-contoso-mail-relay 198.51.100.12 - -  "><td><code class="pill pill-info">MAIL-001</code></td><td><span class="badge badge-info">Mail server</span></td><td><strong>pip-contoso-mail-relay</strong><br><span class="mono muted">198.51.100.12</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-003" data-type="Web service" data-text="web-003 web service api.northwindtraders.com api.northwindtraders.com envoy/1.28.0 -  "><td><code class="pill pill-info">WEB-003</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>api.northwindtraders.com</strong><br><span class="mono muted">api.northwindtraders.com</span></td><td class="mono">envoy/1.28.0</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-005" data-type="Web service" data-text="web-005 web service erp.contoso.com erp.contoso.com microsoft-iis/10.0 -  "><td><code class="pill pill-info">WEB-005</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>erp.contoso.com</strong><br><span class="mono muted">erp.contoso.com</span></td><td class="mono">Microsoft-IIS/10.0</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-007" data-type="Web service" data-text="web-007 web service portal.contoso.com portal.contoso.com nginx/1.24.0 -  "><td><code class="pill pill-info">WEB-007</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>portal.contoso.com</strong><br><span class="mono muted">portal.contoso.com</span></td><td class="mono">nginx/1.24.0</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-008" data-type="Web service" data-text="web-008 web service remote.contoso.com remote.contoso.com microsoft-httpapi/2.0 -  "><td><code class="pill pill-info">WEB-008</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>remote.contoso.com</strong><br><span class="mono muted">remote.contoso.com</span></td><td class="mono">Microsoft-HTTPAPI/2.0</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-009" data-type="Web service" data-text="web-009 web service shop.northwindtraders.com shop.northwindtraders.com cloudflare -  "><td><code class="pill pill-info">WEB-009</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>shop.northwindtraders.com</strong><br><span class="mono muted">shop.northwindtraders.com</span></td><td class="mono">Cloudflare</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-011" data-type="Web service" data-text="web-011 web service www.fabrikam.io www.fabrikam.io nginx/1.26.1 -  "><td><code class="pill pill-info">WEB-011</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>www.fabrikam.io</strong><br><span class="mono muted">www.fabrikam.io</span></td><td class="mono">nginx/1.26.1</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr>
+              <tr class="asset-row" id="asset-CLOUD-002" data-type="Cloud host" data-text="cloud-002 cloud host pip-vm-erp-legacy 198.51.100.52 ms-wbt-server microsoft terminal services 3389/ms-wbt-server management / legacy service ms-wbt-server exposed remote desktop services rce cve-2024-38077 (cisa kev) cve-2024-38077"><td><code class="pill pill-critical">CLOUD-002</code></td><td><span class="badge badge-info">Cloud host</span></td><td><strong>pip-vm-erp-legacy</strong><br><span class="mono muted">198.51.100.52</span></td><td class="mono">ms-wbt-server Microsoft Terminal Services</td><td class="mono">3389/ms-wbt-server</td><td><span class="badge badge-critical" title="Management / legacy service ms-wbt-server exposed">Management / legacy service ms-wbt-server exposed</span> <span class="badge badge-critical" title="Remote Desktop Services RCE CVE-2024-38077 (CISA KEV)">Remote Desktop Services RCE CVE-2024-38077 (CISA KEV)</span> </td><td><span class="mono">CVE-2024-38077</span> <span class="badge badge-kev">KEV</span></td></tr><tr class="asset-row" id="asset-ROUTER-001" data-type="Router" data-text="router-001 router branch-gw45.northwind.net 203.0.113.45 winbox mikrotik routeros 6.48.6 8291/winbox end-of-life routeros 6.48.6 on branch office edge gateway cve-2023-32154"><td><code class="pill pill-critical">ROUTER-001</code></td><td><span class="badge badge-info">Router</span></td><td><strong>branch-gw45.northwind.net</strong><br><span class="mono muted">203.0.113.45</span></td><td class="mono">winbox MikroTik RouterOS 6.48.6</td><td class="mono">8291/winbox</td><td><span class="badge badge-critical" title="End-of-life RouterOS 6.48.6 on branch office edge gateway">End-of-life RouterOS 6.48.6 on branch office edge gateway</span> </td><td><span class="mono">CVE-2023-32154</span></td></tr><tr class="asset-row" id="asset-TENANT-001" data-type="SaaS tenant" data-text="tenant-001 saas tenant saas / identity tenants (saas tenant) - - 2 global administrators without mfa registered conditional access without a policy requiring mfa for all users domain breach history: contoso marketing portal leak (2023-04-18) oauth grant with mail.readwrite to allprincipals open secret scanning alerts in organization repositories organization does not require 2fa for 3 members 14 active guest users with access to tenant resources 6 repos without branch protection app registration secret expired domain breach history: northwind customer support leak (2022-11-05) stale user accounts inactive for &gt;90 days conditional access policies in report-only mode mfa compliance at 91% "><td><code class="pill pill-critical">TENANT-001</code></td><td><span class="badge badge-info">SaaS tenant</span></td><td><strong>SaaS / identity tenants</strong><br><span class="mono muted">(saas tenant)</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="badge badge-critical" title="2 Global Administrators without MFA registered">2 Global Administrators without MFA registered</span> <span class="badge badge-high" title="Conditional Access without a policy requiring MFA for all users">Conditional Access without a policy requiring MFA for all users</span> <span class="badge badge-high" title="Domain breach history: Contoso Marketing Portal Leak (2023-04-18)">Domain breach history: Contoso Marketing Portal Leak (2023-04-18)</span> <span class="badge badge-high" title="OAuth grant with Mail.ReadWrite to AllPrincipals">OAuth grant with Mail.ReadWrite to AllPrincipals</span> <span class="badge badge-high" title="Open secret scanning alerts in organization repositories">Open secret scanning alerts in organization repositories</span> <span class="badge badge-high" title="Organization does not require 2FA for 3 members">Organization does not require 2FA for 3 members</span> <span class="badge badge-medium" title="14 active guest users with access to tenant resources">14 active guest users with access to tenant resources</span> <span class="badge badge-medium" title="6 repos without branch protection">6 repos without branch protection</span> <span class="badge badge-medium" title="App registration secret expired">App registration secret expired</span> <span class="badge badge-medium" title="Domain breach history: Northwind Customer Support Leak (2022-11-05)">Domain breach history: Northwind Customer Support Leak (2022-11-05)</span> <span class="badge badge-medium" title="Stale user accounts inactive for &gt;90 days">Stale user accounts inactive for &gt;90 days</span> <span class="badge badge-low" title="Conditional Access policies in report-only mode">Conditional Access policies in report-only mode</span> <span class="badge badge-info" title="MFA compliance at 91%">MFA compliance at 91%</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-FW-001" data-type="Firewall" data-text="fw-001 firewall edge-fw01.contoso.com 198.51.100.90 http opnsense 23.7.1, lighttpd/1.4.69 443/http firewall / router admin gui on the internet cve-2023-43261"><td><code class="pill pill-high">FW-001</code></td><td><span class="badge badge-info">Firewall</span></td><td><strong>edge-fw01.contoso.com</strong><br><span class="mono muted">198.51.100.90</span></td><td class="mono">http OPNsense 23.7.1, lighttpd/1.4.69</td><td class="mono">443/http</td><td><span class="badge badge-high" title="Firewall / router admin GUI on the internet">Firewall / router admin GUI on the internet</span> </td><td><span class="mono">CVE-2023-43261</span></td></tr><tr class="asset-row" id="asset-ORG-001" data-type="Organization" data-text="org-001 organization organization-wide findings (organization) - - azure storage account stcontosoexports allows public blob access sensitive files in wayback history azure sql server sql-contoso-erp has public network access enabled azure storage account stnorthwindlogs allows unencrypted http traffic fabrikam.io has no dmarc p=reject key vault kv-contoso-prod has purge protection disabled key vault kv-northwind-dev has purge protection disabled microsoft defender for cloud disabled (free tier) for sqlservers microsoft defender for cloud disabled (free tier) for storageaccounts microsoft defender for cloud disabled (free tier) for virtualmachines nsg allows 3389 from internet azure storage account stcontosobackups uses legacy tls (tls1_1) azure storage account stnorthwindlogs uses legacy tls (tls1_0) dnssec unsigned on fabrikam.io no caa on fabrikam.io multi-cloud attack surface perimeter mapped "><td><code class="pill pill-high">ORG-001</code></td><td><span class="badge badge-info">Organization</span></td><td><strong>Organization-wide findings</strong><br><span class="mono muted">(organization)</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="badge badge-high" title="Azure Storage Account stcontosoexports allows public blob access">Azure Storage Account stcontosoexports allows public blob access</span> <span class="badge badge-high" title="Sensitive files in Wayback history">Sensitive files in Wayback history</span> <span class="badge badge-medium" title="Azure SQL Server sql-contoso-erp has public network access enabled">Azure SQL Server sql-contoso-erp has public network access enabled</span> <span class="badge badge-medium" title="Azure Storage Account stnorthwindlogs allows unencrypted HTTP traffic">Azure Storage Account stnorthwindlogs allows unencrypted HTTP traffic</span> <span class="badge badge-medium" title="fabrikam.io has no DMARC p=reject">fabrikam.io has no DMARC p=reject</span> <span class="badge badge-medium" title="Key Vault kv-contoso-prod has purge protection disabled">Key Vault kv-contoso-prod has purge protection disabled</span> <span class="badge badge-medium" title="Key Vault kv-northwind-dev has purge protection disabled">Key Vault kv-northwind-dev has purge protection disabled</span> <span class="badge badge-medium" title="Microsoft Defender for Cloud disabled (Free tier) for SqlServers">Microsoft Defender for Cloud disabled (Free tier) for SqlServers</span> <span class="badge badge-medium" title="Microsoft Defender for Cloud disabled (Free tier) for StorageAccounts">Microsoft Defender for Cloud disabled (Free tier) for StorageAccounts</span> <span class="badge badge-medium" title="Microsoft Defender for Cloud disabled (Free tier) for VirtualMachines">Microsoft Defender for Cloud disabled (Free tier) for VirtualMachines</span> <span class="badge badge-medium" title="NSG allows 3389 from Internet">NSG allows 3389 from Internet</span> <span class="badge badge-low" title="Azure Storage Account stcontosobackups uses legacy TLS (TLS1_1)">Azure Storage Account stcontosobackups uses legacy TLS (TLS1_1)</span> <span class="badge badge-low" title="Azure Storage Account stnorthwindlogs uses legacy TLS (TLS1_0)">Azure Storage Account stnorthwindlogs uses legacy TLS (TLS1_0)</span> <span class="badge badge-low" title="DNSSEC unsigned on fabrikam.io">DNSSEC unsigned on fabrikam.io</span> <span class="badge badge-low" title="No CAA on fabrikam.io">No CAA on fabrikam.io</span> <span class="badge badge-info" title="Multi-cloud attack surface perimeter mapped">Multi-cloud attack surface perimeter mapped</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-001" data-type="Web service" data-text="web-001 web service ec2-legacy-app.aws.com 203.0.113.19 http apache httpd 2.4.49 80/http apache 2.4.49 path traversal &amp; rce cve-2021-41773 (cisa kev) cve-2021-41773"><td><code class="pill pill-high">WEB-001</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>ec2-legacy-app.aws.com</strong><br><span class="mono muted">203.0.113.19</span></td><td class="mono">http Apache httpd 2.4.49</td><td class="mono">80/http</td><td><span class="badge badge-high" title="Apache 2.4.49 Path Traversal &amp; RCE CVE-2021-41773 (CISA KEV)">Apache 2.4.49 Path Traversal &amp; RCE CVE-2021-41773 (CISA KEV)</span> </td><td><span class="mono">CVE-2021-41773</span> <span class="badge badge-kev">KEV</span></td></tr><tr class="asset-row" id="asset-WEB-002" data-type="Web service" data-text="web-002 web service api-staging.northwindtraders.com api-staging.northwindtraders.com apache/2.4.49 - exposed openapi / swagger specification "><td><code class="pill pill-high">WEB-002</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>api-staging.northwindtraders.com</strong><br><span class="mono muted">api-staging.northwindtraders.com</span></td><td class="mono">Apache/2.4.49</td><td class="mono">-</td><td><span class="badge badge-high" title="Exposed OpenAPI / Swagger specification">Exposed OpenAPI / Swagger specification</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-004" data-type="Web service" data-text="web-004 web service dev-portal.fabrikam.io dev-portal.fabrikam.io nginx/1.22.1 - exposed environment configuration (.env) "><td><code class="pill pill-high">WEB-004</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>dev-portal.fabrikam.io</strong><br><span class="mono muted">dev-portal.fabrikam.io</span></td><td class="mono">nginx/1.22.1</td><td class="mono">-</td><td><span class="badge badge-high" title="Exposed environment configuration (.env)">Exposed environment configuration (.env)</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-006" data-type="Web service" data-text="web-006 web service files.northwindtraders.com files.northwindtraders.com apache/2.4.52 - unauthenticated directory listing "><td><code class="pill pill-high">WEB-006</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>files.northwindtraders.com</strong><br><span class="mono muted">files.northwindtraders.com</span></td><td class="mono">Apache/2.4.52</td><td class="mono">-</td><td><span class="badge badge-high" title="Unauthenticated directory listing">Unauthenticated directory listing</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-ASSET-001" data-type="Asset" data-text="asset-001 asset droplet-untracked-77.do.net 192.0.2.77 - - fabrikam.io apex resolves to infrastructure not in our inventory "><td><code class="pill pill-medium">ASSET-001</code></td><td><span class="badge badge-info">Asset</span></td><td><strong>droplet-untracked-77.do.net</strong><br><span class="mono muted">192.0.2.77</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="badge badge-medium" title="fabrikam.io apex resolves to infrastructure not in our inventory">fabrikam.io apex resolves to infrastructure not in our inventory</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-ASSET-002" data-type="Asset" data-text="asset-002 asset 0.0.0.0 0.0.0.0 - - gcp firewall allows tcp:22 from internet "><td><code class="pill pill-medium">ASSET-002</code></td><td><span class="badge badge-info">Asset</span></td><td><strong>0.0.0.0</strong><br><span class="mono muted">0.0.0.0</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="badge badge-medium" title="GCP firewall allows tcp:22 from Internet">GCP firewall allows tcp:22 from Internet</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-DOMAIN-001" data-type="Domain / name" data-text="domain-001 domain / name ci.contoso.com ci.contoso.com - - webhook without ssl verification "><td><code class="pill pill-medium">DOMAIN-001</code></td><td><span class="badge badge-info">Domain / name</span></td><td><strong>ci.contoso.com</strong><br><span class="mono muted">ci.contoso.com</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="badge badge-medium" title="Webhook without SSL verification">Webhook without SSL verification</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-K8S-003" data-type="Kubernetes ingress" data-text="k8s-003 kubernetes ingress pip-shop-frontend-lb 203.0.113.88 http nginx 1.20.1, nginx/1.20.1 443/http expired tls certificate cve-2021-23017"><td><code class="pill pill-medium">K8S-003</code></td><td><span class="badge badge-info">Kubernetes ingress</span></td><td><strong>pip-shop-frontend-lb</strong><br><span class="mono muted">203.0.113.88</span></td><td class="mono">http nginx 1.20.1, nginx/1.20.1</td><td class="mono">443/http</td><td><span class="badge badge-medium" title="Expired TLS certificate">Expired TLS certificate</span> </td><td><span class="mono">CVE-2021-23017</span></td></tr><tr class="asset-row" id="asset-VPN-001" data-type="VPN gateway" data-text="vpn-001 vpn gateway pip-contoso-vpn-gw 198.51.100.15 - - internal-named host publicly resolvable "><td><code class="pill pill-medium">VPN-001</code></td><td><span class="badge badge-info">VPN gateway</span></td><td><strong>pip-contoso-vpn-gw</strong><br><span class="mono muted">198.51.100.15</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="badge badge-medium" title="Internal-named host publicly resolvable">Internal-named host publicly resolvable</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-010" data-type="Web service" data-text="web-010 web service www.contoso.com www.contoso.com microsoft-iis/10.0 - public website missing security headers "><td><code class="pill pill-low">WEB-010</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>www.contoso.com</strong><br><span class="mono muted">www.contoso.com</span></td><td class="mono">Microsoft-IIS/10.0</td><td class="mono">-</td><td><span class="badge badge-low" title="Public website missing security headers">Public website missing security headers</span> </td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-CLOUD-001" data-type="Cloud host" data-text="cloud-001 cloud host pip-contoso-apim-prod 198.51.100.102 - -  "><td><code class="pill pill-info">CLOUD-001</code></td><td><span class="badge badge-info">Cloud host</span></td><td><strong>pip-contoso-apim-prod</strong><br><span class="mono muted">198.51.100.102</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-CLOUD-003" data-type="Cloud host" data-text="cloud-003 cloud host pip-dataflow-worker 203.0.113.140 - -  "><td><code class="pill pill-info">CLOUD-003</code></td><td><span class="badge badge-info">Cloud host</span></td><td><strong>pip-dataflow-worker</strong><br><span class="mono muted">203.0.113.140</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-CLOUD-004" data-type="Cloud host" data-text="cloud-004 cloud host pip-analytics-bastion 203.0.113.92 - -  "><td><code class="pill pill-info">CLOUD-004</code></td><td><span class="badge badge-info">Cloud host</span></td><td><strong>pip-analytics-bastion</strong><br><span class="mono muted">203.0.113.92</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-K8S-001" data-type="Kubernetes ingress" data-text="k8s-001 kubernetes ingress pip-contoso-aks-ingress 198.51.100.75 - -  "><td><code class="pill pill-info">K8S-001</code></td><td><span class="badge badge-info">Kubernetes ingress</span></td><td><strong>pip-contoso-aks-ingress</strong><br><span class="mono muted">198.51.100.75</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-K8S-002" data-type="Kubernetes ingress" data-text="k8s-002 kubernetes ingress pip-gke-ingress-cl1 203.0.113.115 - -  "><td><code class="pill pill-info">K8S-002</code></td><td><span class="badge badge-info">Kubernetes ingress</span></td><td><strong>pip-gke-ingress-cl1</strong><br><span class="mono muted">203.0.113.115</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-LB-001" data-type="Load balancer" data-text="lb-001 load balancer pip-contoso-erp-prod-01 198.51.100.10 http openssl 1.1.1k 443/http  cve-2022-0778"><td><code class="pill pill-info">LB-001</code></td><td><span class="badge badge-info">Load balancer</span></td><td><strong>pip-contoso-erp-prod-01</strong><br><span class="mono muted">198.51.100.10</span></td><td class="mono">http OpenSSL 1.1.1k</td><td class="mono">443/http</td><td><span class="muted">none</span></td><td><span class="mono">CVE-2022-0778</span></td></tr><tr class="asset-row" id="asset-MAIL-001" data-type="Mail server" data-text="mail-001 mail server pip-contoso-mail-relay 198.51.100.12 - -  "><td><code class="pill pill-info">MAIL-001</code></td><td><span class="badge badge-info">Mail server</span></td><td><strong>pip-contoso-mail-relay</strong><br><span class="mono muted">198.51.100.12</span></td><td class="mono">-</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-003" data-type="Web service" data-text="web-003 web service api.northwindtraders.com api.northwindtraders.com envoy/1.28.0 -  "><td><code class="pill pill-info">WEB-003</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>api.northwindtraders.com</strong><br><span class="mono muted">api.northwindtraders.com</span></td><td class="mono">envoy/1.28.0</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-005" data-type="Web service" data-text="web-005 web service erp.contoso.com erp.contoso.com microsoft-iis/10.0 -  "><td><code class="pill pill-info">WEB-005</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>erp.contoso.com</strong><br><span class="mono muted">erp.contoso.com</span></td><td class="mono">Microsoft-IIS/10.0</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-007" data-type="Web service" data-text="web-007 web service portal.contoso.com portal.contoso.com nginx/1.24.0 -  "><td><code class="pill pill-info">WEB-007</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>portal.contoso.com</strong><br><span class="mono muted">portal.contoso.com</span></td><td class="mono">nginx/1.24.0</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-008" data-type="Web service" data-text="web-008 web service remote.contoso.com remote.contoso.com microsoft-httpapi/2.0 -  "><td><code class="pill pill-info">WEB-008</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>remote.contoso.com</strong><br><span class="mono muted">remote.contoso.com</span></td><td class="mono">Microsoft-HTTPAPI/2.0</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-009" data-type="Web service" data-text="web-009 web service shop.northwindtraders.com shop.northwindtraders.com cloudflare -  "><td><code class="pill pill-info">WEB-009</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>shop.northwindtraders.com</strong><br><span class="mono muted">shop.northwindtraders.com</span></td><td class="mono">Cloudflare</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr><tr class="asset-row" id="asset-WEB-011" data-type="Web service" data-text="web-011 web service www.fabrikam.io www.fabrikam.io nginx/1.26.1 -  "><td><code class="pill pill-info">WEB-011</code></td><td><span class="badge badge-info">Web service</span></td><td><strong>www.fabrikam.io</strong><br><span class="mono muted">www.fabrikam.io</span></td><td class="mono">nginx/1.26.1</td><td class="mono">-</td><td><span class="muted">none</span></td><td><span class="muted">-</span></td></tr>
             </tbody>
           </table>
           <div id="assets-no-results" class="empty-state" style="display: none;">No assets match your filter criteria.</div>

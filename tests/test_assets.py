@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from recon.assets import AssetRegistry, build_assets, normalize_key
+from recon.assets import AssetRegistry, build_assets, normalize_all, normalize_key
 
 
 class _FakeData:
@@ -37,8 +37,15 @@ class TestNormalizeKey(unittest.TestCase):
     def test_multi_target_uses_first(self) -> None:
         self.assertEqual(normalize_key("203.0.113.9, 203.0.113.10"), "203.0.113.9")
 
+    def test_normalize_all_returns_every_key(self) -> None:
+        self.assertEqual(
+            normalize_all("203.0.113.9, https://a.example.com/x, host.example.com:8443"),
+            ["203.0.113.9", "a.example.com", "host.example.com"],
+        )
+
     def test_empty(self) -> None:
         self.assertEqual(normalize_key(""), "")
+        self.assertEqual(normalize_all(""), [])
 
 
 class TestAssetRegistry(unittest.TestCase):
@@ -110,12 +117,30 @@ class TestBuildAssets(unittest.TestCase):
         ids2 = {a["key"]: a["id"] for a in assets2}
         self.assertEqual(ids1, ids2)
 
-    def test_finding_without_target_has_no_asset(self) -> None:
+    def test_finding_affects_multiple_assets(self) -> None:
         assets, run_dir, data = self._run(
-            findings=[{"severity": "HIGH", "key": "org1", "title": "tenant issue",
-                       "evidence": "e", "target": ""}],
+            findings=[{"severity": "HIGH", "key": "nsg1", "title": "NSG allows 22 from Internet",
+                       "evidence": "e", "target": "203.0.113.9, 203.0.113.10"}],
         )
-        self.assertEqual(data.findings[0]["asset_id"], "")
+        f = data.findings[0]
+        self.assertEqual(len(f["asset_ids"]), 2)
+        self.assertEqual(f["asset_id"], f["asset_ids"][0])  # primary = first
+        # the finding appears under both assets' inventories
+        for a in assets:
+            if a["key"] in ("203.0.113.9", "203.0.113.10"):
+                self.assertIn(f, a["findings"])
+
+    def test_targetless_finding_gets_pseudo_asset(self) -> None:
+        assets, run_dir, data = self._run(
+            findings=[
+                {"severity": "CRITICAL", "key": "m365-admin-no-mfa",
+                 "title": "Global Administrators without MFA", "evidence": "e", "target": ""},
+                {"severity": "MEDIUM", "key": "dns",
+                 "title": "No CAA on example.com", "evidence": "e", "target": ""},
+            ],
+        )
+        self.assertEqual(data.findings[0]["asset_id"], "TENANT-001")
+        self.assertEqual(data.findings[1]["asset_id"], "ORG-001")
 
 
 if __name__ == "__main__":

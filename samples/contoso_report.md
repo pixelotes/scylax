@@ -46,46 +46,46 @@ This report presents the findings and asset inventory resulting from automated e
 | `CRITICAL` | `CLOUD-002` | Management / legacy service ms-wbt-server exposed | 198.51.100.52 | `198.51.100.52:3389 Microsoft Terminal Services` | `mgmt:198.51.100.52:3389` |
 | `CRITICAL` | `CLOUD-002` | Remote Desktop Services RCE CVE-2024-38077 (CISA KEV) | 198.51.100.52 | `198.51.100.52:3389 Microsoft Remote Desktop Services (CVSS 9.8)` | `cve:198.51.100.52:CVE-2024-38077` |
 | `CRITICAL` | `ROUTER-001` | End-of-life RouterOS 6.48.6 on branch office edge gateway | 203.0.113.45 | `203.0.113.45:8291 MikroTik RouterOS 6.48.6 (RouterOS winbox)` | `routeros:203.0.113.45` |
-| `CRITICAL` | - | 2 Global Administrators without MFA registered | - | `Accounts admin-backup@contoso.com, breakglass-svc@contoso.com have Global Admin role without MFA registered` | `m365-admin-no-mfa` |
+| `CRITICAL` | `TENANT-001` | 2 Global Administrators without MFA registered | - | `Accounts admin-backup@contoso.com, breakglass-svc@contoso.com have Global Admin role without MFA registered` | `m365-admin-no-mfa` |
+| `HIGH` | `TENANT-001` | Conditional Access without a policy requiring MFA for all users | - | `No active Conditional Access policy enforces MFA for all users across all cloud apps` | `m365-ca-no-mfa-all` |
+| `HIGH` | `TENANT-001` | Domain breach history: Contoso Marketing Portal Leak (2023-04-18) | - | `18400 accounts, exposed: Email addresses;Passwords;Job titles` | `hibp:contoso.com:ContosoMarketing2023` |
+| `HIGH` | `TENANT-001` | OAuth grant with Mail.ReadWrite to AllPrincipals | - | `Delegated permission Mail.ReadWrite consented for AllPrincipals scope on ContosoMailSyncApp` | `m365-oauth-allprincipals-mail` |
+| `HIGH` | `TENANT-001` | Open secret scanning alerts in organization repositories | - | `2 unresolved secret scanning alerts in contoso-org/contoso-api` | `gh-secret-scanning-alerts` |
+| `HIGH` | `TENANT-001` | Organization does not require 2FA for 3 members | - | `3 members without 2FA registered in contoso-org; two_factor_requirement_enabled=false` | `gh-org-2fa-disabled` |
+| `MEDIUM` | `TENANT-001` | 14 active guest users with access to tenant resources | - | `14 external guest user accounts active; 4 have not signed in for over 180 days` | `m365-guest-users-active` |
+| `MEDIUM` | `TENANT-001` | 6 repos without branch protection | - | `Repositories contoso-api, northwind-web, fabrikam-core, data-pipeline, devops-tools, staging-env lack default branch protection` | `gh-repo-no-branch-protection` |
+| `MEDIUM` | `TENANT-001` | App registration secret expired | - | `Client secret for app contoso-crm-connector expired on 2026-10-15` | `m365-app-secret-expired` |
+| `MEDIUM` | `TENANT-001` | Domain breach history: Northwind Customer Support Leak (2022-11-05) | - | `9350 accounts, exposed: Email addresses;Names;Phone numbers` | `hibp:northwindtraders.com:NorthwindSupport2022` |
+| `MEDIUM` | `TENANT-001` | Stale user accounts inactive for >90 days | - | `8 enabled user accounts with lastSignInDateTime older than 90 days` | `m365-stale-accounts` |
+| `LOW` | `TENANT-001` | Conditional Access policies in report-only mode | - | `Policy CA003-LegacyAuthBlock configured in report-only mode (not enforced)` | `m365-ca-report-only` |
+| `INFO` | `TENANT-001` | MFA compliance at 91% | - | `242 of 266 total licensed users in contoso.com tenant have registered MFA authentication methods` | `m365-mfa-compliance` |
 | `HIGH` | `FW-001` | Firewall / router admin GUI on the internet | 198.51.100.90 | `Login \| OPNsense at https://198.51.100.90/ (port 443)` | `fw-admin:198.51.100.90` |
+| `HIGH` | `ORG-001` | Azure Storage Account stcontosoexports allows public blob access | - | `rg-contoso-storage/stcontosoexports allowBlobPublicAccess=true` | `az-storage-public:stcontosoexports` |
+| `HIGH` | `ORG-001` | Sensitive files in Wayback history | - | `18 URLs with config/sql/backup extensions` | `wayback-critical` |
+| `MEDIUM` | `ORG-001` | Azure SQL Server sql-contoso-erp has public network access enabled | - | `rg-contoso-erp-prod/sql-contoso-erp publicNetworkAccess=Enabled` | `az-sql-public:sql-contoso-erp` |
+| `MEDIUM` | `ORG-001` | Azure Storage Account stnorthwindlogs allows unencrypted HTTP traffic | - | `rg-northwind-data/stnorthwindlogs supportsHttpsTrafficOnly=false` | `az-storage-http:stnorthwindlogs` |
+| `MEDIUM` | `ORG-001` | fabrikam.io has no DMARC p=reject | - | `v=DMARC1; p=none; rua=mailto:dmarc@fabrikam.io` | `dmarc:fabrikam.io` |
+| `MEDIUM` | `ORG-001` | Key Vault kv-contoso-prod has purge protection disabled | - | `rg-contoso-security/kv-contoso-prod enablePurgeProtection=false` | `az-kv-purge:kv-contoso-prod` |
+| `MEDIUM` | `ORG-001` | Key Vault kv-northwind-dev has purge protection disabled | - | `rg-northwind-security/kv-northwind-dev enablePurgeProtection=false` | `az-kv-purge:kv-northwind-dev` |
+| `MEDIUM` | `ORG-001` | Microsoft Defender for Cloud disabled (Free tier) for SqlServers | - | `pricingTier=Free` | `az-defender-free:SqlServers` |
+| `MEDIUM` | `ORG-001` | Microsoft Defender for Cloud disabled (Free tier) for StorageAccounts | - | `pricingTier=Free` | `az-defender-free:StorageAccounts` |
+| `MEDIUM` | `ORG-001` | Microsoft Defender for Cloud disabled (Free tier) for VirtualMachines | - | `pricingTier=Free` | `az-defender-free:VirtualMachines` |
+| `MEDIUM` | `ORG-001` | NSG allows 3389 from Internet | - | `rg-contoso-erp-prod/nsg-contoso-erp-prod rule Allow-RDP-Internet (nics: nic-contoso-erp-01)` | `nsg:nsg-contoso-erp-prod:Allow-RDP-Internet` |
+| `LOW` | `ORG-001` | Azure Storage Account stcontosobackups uses legacy TLS (TLS1_1) | - | `rg-contoso-storage/stcontosobackups minimumTlsVersion=TLS1_1` | `az-storage-tls:stcontosobackups` |
+| `LOW` | `ORG-001` | Azure Storage Account stnorthwindlogs uses legacy TLS (TLS1_0) | - | `rg-northwind-data/stnorthwindlogs minimumTlsVersion=TLS1_0` | `az-storage-tls:stnorthwindlogs` |
+| `LOW` | `ORG-001` | DNSSEC unsigned on fabrikam.io | - | `dig DNSKEY fabrikam.io` | `dnssec:fabrikam.io` |
+| `LOW` | `ORG-001` | No CAA on fabrikam.io | - | `dig CAA fabrikam.io` | `caa:fabrikam.io` |
+| `INFO` | `ORG-001` | Multi-cloud attack surface perimeter mapped | - | `85 subdomains identified across 3 domains in AWS, Azure, GCP, and DigitalOcean` | `perimeter:mapping` |
 | `HIGH` | `WEB-001` | Apache 2.4.49 Path Traversal & RCE CVE-2021-41773 (CISA KEV) | 203.0.113.19 | `203.0.113.19:80 Apache/2.4.49 (Unix) mod_ssl/2.4.49` | `cve:203.0.113.19:CVE-2021-41773` |
 | `HIGH` | `WEB-002` | Exposed OpenAPI / Swagger specification | api-staging.northwindtraders.com | `https://api-staging.northwindtraders.com/v2/api-docs (Swagger 2.0 API spec)` | `path:api-staging.northwindtraders.com/v2/api-docs` |
 | `HIGH` | `WEB-004` | Exposed environment configuration (.env) | dev-portal.fabrikam.io | `https://dev-portal.fabrikam.io/.env contains APP_KEY and DB_PASSWORD` | `path:dev-portal.fabrikam.io/.env` |
 | `HIGH` | `WEB-006` | Unauthenticated directory listing | files.northwindtraders.com | `https://files.northwindtraders.com/exports/ (Index of /exports)` | `dirlist:https://files.northwindtraders.com/exports/` |
-| `HIGH` | - | Azure Storage Account stcontosoexports allows public blob access | - | `rg-contoso-storage/stcontosoexports allowBlobPublicAccess=true` | `az-storage-public:stcontosoexports` |
-| `HIGH` | - | Organization does not require 2FA for 3 members | - | `3 members without 2FA registered in contoso-org; two_factor_requirement_enabled=false` | `gh-org-2fa-disabled` |
-| `HIGH` | - | Open secret scanning alerts in organization repositories | - | `2 unresolved secret scanning alerts in contoso-org/contoso-api` | `gh-secret-scanning-alerts` |
-| `HIGH` | - | Domain breach history: Contoso Marketing Portal Leak (2023-04-18) | - | `18400 accounts, exposed: Email addresses;Passwords;Job titles` | `hibp:contoso.com:ContosoMarketing2023` |
-| `HIGH` | - | Conditional Access without a policy requiring MFA for all users | - | `No active Conditional Access policy enforces MFA for all users across all cloud apps` | `m365-ca-no-mfa-all` |
-| `HIGH` | - | OAuth grant with Mail.ReadWrite to AllPrincipals | - | `Delegated permission Mail.ReadWrite consented for AllPrincipals scope on ContosoMailSyncApp` | `m365-oauth-allprincipals-mail` |
-| `HIGH` | - | Sensitive files in Wayback history | - | `18 URLs with config/sql/backup extensions` | `wayback-critical` |
 | `MEDIUM` | `ASSET-001` | fabrikam.io apex resolves to infrastructure not in our inventory | 192.0.2.77 | `192.0.2.77 (DigitalOcean, LLC)` | `apex:fabrikam.io` |
 | `MEDIUM` | `ASSET-002` | GCP firewall allows tcp:22 from Internet | 0.0.0.0 | `contoso-analytics-prod/allow-ssh-legacy (source: 0.0.0.0/0)` | `gcp-fw:allow-ssh-legacy` |
 | `MEDIUM` | `DOMAIN-001` | Webhook without SSL verification | ci.contoso.com | `Webhook URL https://ci.contoso.com/gh-hook in contoso-org/northwind-web has SSL verification disabled` | `gh-webhook-ssl-insecure` |
 | `MEDIUM` | `K8S-003` | Expired TLS certificate | 203.0.113.88 | `203.0.113.88 expired 2026-08-14` | `cert-expired:203.0.113.88` |
 | `MEDIUM` | `VPN-001` | Internal-named host publicly resolvable | 198.51.100.15 | `vpn-internal.contoso.com -> 198.51.100.15` | `internal-name:vpn-internal.contoso.com` |
-| `MEDIUM` | - | Microsoft Defender for Cloud disabled (Free tier) for SqlServers | - | `pricingTier=Free` | `az-defender-free:SqlServers` |
-| `MEDIUM` | - | Microsoft Defender for Cloud disabled (Free tier) for StorageAccounts | - | `pricingTier=Free` | `az-defender-free:StorageAccounts` |
-| `MEDIUM` | - | Microsoft Defender for Cloud disabled (Free tier) for VirtualMachines | - | `pricingTier=Free` | `az-defender-free:VirtualMachines` |
-| `MEDIUM` | - | Key Vault kv-contoso-prod has purge protection disabled | - | `rg-contoso-security/kv-contoso-prod enablePurgeProtection=false` | `az-kv-purge:kv-contoso-prod` |
-| `MEDIUM` | - | Key Vault kv-northwind-dev has purge protection disabled | - | `rg-northwind-security/kv-northwind-dev enablePurgeProtection=false` | `az-kv-purge:kv-northwind-dev` |
-| `MEDIUM` | - | Azure SQL Server sql-contoso-erp has public network access enabled | - | `rg-contoso-erp-prod/sql-contoso-erp publicNetworkAccess=Enabled` | `az-sql-public:sql-contoso-erp` |
-| `MEDIUM` | - | Azure Storage Account stnorthwindlogs allows unencrypted HTTP traffic | - | `rg-northwind-data/stnorthwindlogs supportsHttpsTrafficOnly=false` | `az-storage-http:stnorthwindlogs` |
-| `MEDIUM` | - | fabrikam.io has no DMARC p=reject | - | `v=DMARC1; p=none; rua=mailto:dmarc@fabrikam.io` | `dmarc:fabrikam.io` |
-| `MEDIUM` | - | 6 repos without branch protection | - | `Repositories contoso-api, northwind-web, fabrikam-core, data-pipeline, devops-tools, staging-env lack default branch protection` | `gh-repo-no-branch-protection` |
-| `MEDIUM` | - | Domain breach history: Northwind Customer Support Leak (2022-11-05) | - | `9350 accounts, exposed: Email addresses;Names;Phone numbers` | `hibp:northwindtraders.com:NorthwindSupport2022` |
-| `MEDIUM` | - | App registration secret expired | - | `Client secret for app contoso-crm-connector expired on 2026-10-15` | `m365-app-secret-expired` |
-| `MEDIUM` | - | 14 active guest users with access to tenant resources | - | `14 external guest user accounts active; 4 have not signed in for over 180 days` | `m365-guest-users-active` |
-| `MEDIUM` | - | Stale user accounts inactive for >90 days | - | `8 enabled user accounts with lastSignInDateTime older than 90 days` | `m365-stale-accounts` |
-| `MEDIUM` | - | NSG allows 3389 from Internet | - | `rg-contoso-erp-prod/nsg-contoso-erp-prod rule Allow-RDP-Internet (nics: nic-contoso-erp-01)` | `nsg:nsg-contoso-erp-prod:Allow-RDP-Internet` |
 | `LOW` | `WEB-010` | Public website missing security headers | www.contoso.com | `https://www.contoso.com: permissions-policy x-content-type-options` | `headers:www` |
-| `LOW` | - | Azure Storage Account stcontosobackups uses legacy TLS (TLS1_1) | - | `rg-contoso-storage/stcontosobackups minimumTlsVersion=TLS1_1` | `az-storage-tls:stcontosobackups` |
-| `LOW` | - | Azure Storage Account stnorthwindlogs uses legacy TLS (TLS1_0) | - | `rg-northwind-data/stnorthwindlogs minimumTlsVersion=TLS1_0` | `az-storage-tls:stnorthwindlogs` |
-| `LOW` | - | No CAA on fabrikam.io | - | `dig CAA fabrikam.io` | `caa:fabrikam.io` |
-| `LOW` | - | DNSSEC unsigned on fabrikam.io | - | `dig DNSKEY fabrikam.io` | `dnssec:fabrikam.io` |
-| `LOW` | - | Conditional Access policies in report-only mode | - | `Policy CA003-LegacyAuthBlock configured in report-only mode (not enforced)` | `m365-ca-report-only` |
-| `INFO` | - | MFA compliance at 91% | - | `242 of 266 total licensed users in contoso.com tenant have registered MFA authentication methods` | `m365-mfa-compliance` |
-| `INFO` | - | Multi-cloud attack surface perimeter mapped | - | `85 subdomains identified across 3 domains in AWS, Azure, GCP, and DigitalOcean` | `perimeter:mapping` |
 
 ## 2b. Asset Inventory
 
@@ -95,7 +95,9 @@ This report presents the findings and asset inventory resulting from automated e
 |---|---|---|---|---|---|---|
 | `CLOUD-002` | Cloud host | pip-vm-erp-legacy (`198.51.100.52`) | ms-wbt-server Microsoft Terminal Services | 3389/ms-wbt-server | 2 — Management / legacy service ms-wbt-server exposed; Remote Desktop Services RCE CVE-2024-38077 (CISA KEV) | CVE-2024-38077 |
 | `ROUTER-001` | Router | branch-gw45.northwind.net (`203.0.113.45`) | winbox MikroTik RouterOS 6.48.6 | 8291/winbox | 1 — End-of-life RouterOS 6.48.6 on branch office edge gateway | CVE-2023-32154 |
+| `TENANT-001` | SaaS tenant | SaaS / identity tenants (`(saas tenant)`) | - | - | 13 — 2 Global Administrators without MFA registered; Conditional Access without a policy requiring MFA for all users; Domain breach history: Contoso Marketing Portal Leak (2023-04-18); OAuth grant with Mail.ReadWrite to AllPrincipals; Open secret scanning alerts in organization repositories; Organization does not require 2FA for 3 members; 14 active guest users with access to tenant resources; 6 repos without branch protection; App registration secret expired; Domain breach history: Northwind Customer Support Leak (2022-11-05); Stale user accounts inactive for >90 days; Conditional Access policies in report-only mode; MFA compliance at 91% | - |
 | `FW-001` | Firewall | edge-fw01.contoso.com (`198.51.100.90`) | http OPNsense 23.7.1, lighttpd/1.4.69 | 443/http | 1 — Firewall / router admin GUI on the internet | CVE-2023-43261 |
+| `ORG-001` | Organization | Organization-wide findings (`(organization)`) | - | - | 16 — Azure Storage Account stcontosoexports allows public blob access; Sensitive files in Wayback history; Azure SQL Server sql-contoso-erp has public network access enabled; Azure Storage Account stnorthwindlogs allows unencrypted HTTP traffic; fabrikam.io has no DMARC p=reject; Key Vault kv-contoso-prod has purge protection disabled; Key Vault kv-northwind-dev has purge protection disabled; Microsoft Defender for Cloud disabled (Free tier) for SqlServers; Microsoft Defender for Cloud disabled (Free tier) for StorageAccounts; Microsoft Defender for Cloud disabled (Free tier) for VirtualMachines; NSG allows 3389 from Internet; Azure Storage Account stcontosobackups uses legacy TLS (TLS1_1); Azure Storage Account stnorthwindlogs uses legacy TLS (TLS1_0); DNSSEC unsigned on fabrikam.io; No CAA on fabrikam.io; Multi-cloud attack surface perimeter mapped | - |
 | `WEB-001` | Web service | ec2-legacy-app.aws.com (`203.0.113.19`) | http Apache httpd 2.4.49 | 80/http | 1 — Apache 2.4.49 Path Traversal & RCE CVE-2021-41773 (CISA KEV) | CVE-2021-41773 |
 | `WEB-002` | Web service | api-staging.northwindtraders.com (`api-staging.northwindtraders.com`) | Apache/2.4.49 | - | 1 — Exposed OpenAPI / Swagger specification | - |
 | `WEB-004` | Web service | dev-portal.fabrikam.io (`dev-portal.fabrikam.io`) | nginx/1.22.1 | - | 1 — Exposed environment configuration (.env) | - |
