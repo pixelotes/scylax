@@ -13,7 +13,8 @@ explicitly. See [phases.md](phases.md) for what each phase does.
 | Flag | Env | Meaning |
 |---|---|---|
 | `-s`, `--scope` | `SCOPE` | Scope TOML file (default `scopes/default.toml`). |
-| `-p`, `--phases` | `PHASES` | Space-separated phases to run (default: all). |
+| `--profile` | `PROFILE` | Phase-group preset (sets phases + posture toggles). See [Profiles](#profiles). `--profile list` prints them. |
+| `-p`, `--phases` | `PHASES` | Space-separated phases to run (default: all). An explicit `-p` overrides a profile's phases. |
 | `-d`, `--date` | `RUN_DATE` | Run folder name (default: today, `YYYY-MM-DD`). |
 | `-P`, `--passive-only` | `SKIP_ACTIVE=1` | Skip active phases (3, 4, 4b, 5, 8, A, G, W, C). |
 | `-n`, `--no-cloud` | `SKIP_CLOUD=1` | Skip cloud annexes A, G, W. |
@@ -39,7 +40,7 @@ explicitly. See [phases.md](phases.md) for what each phase does.
 The default phase string is:
 
 ```
-1 2 3 4 4b 5 6 7 8 9 A G W S C T
+1 2 3 4 4b 5 6 7 8 9 A G W S C E T
 ```
 
 Pass a subset with `-p`. Examples:
@@ -58,9 +59,49 @@ python3 scylax.py -s scopes/acme.toml -p "1 2 3 4 4b 5 6 7 8 9 C T"
 python3 scylax.py -s scopes/acme.toml -p "A T"
 ```
 
-Naming a normally-opt-in phase (A/G/W/S/C) with `-p` forces it to run even if its
+Naming a normally-opt-in phase (A/G/W/S/C/E) with `-p` forces it to run even if its
 section is empty — e.g. `-p "A T"` queries every subscription in the active Azure
 tenant.
+
+## Profiles
+
+A **profile** is a named phase group that also sets the matching posture toggles,
+so you don't have to spell out phases and `--cloud-posture` / `--saas-posture` by
+hand. Select one with `--profile <name>` (or `PROFILE=<name>`); `--profile list`
+prints every profile with its phases and description.
+
+```bash
+python3 scylax.py -s scopes/acme.toml --profile light
+python3 scylax.py -s scopes/acme.toml --profile blueteam
+python3 scylax.py --profile list
+```
+
+| Profile | Phases | Toggles | Purpose |
+|---|---|---|---|
+| `passive` | `1 2 6 7 9` | — | Zero-touch OSINT; no authorization needed. |
+| `light` | `1 2 3 5 6 7 8 9 E` | — | Safe active recon, **no** nmap port scans. Good for frequent/CTEM runs. |
+| `external` | `1 2 3 4 4b 5 6 7 8 9 C E` | — | Full external attack surface (attacker's view). |
+| `blueteam` | `1 2 6 7 9 E A G W S` | cloud + SaaS posture | Defender posture of your own cloud/SaaS tenants; minimal scanning. |
+| `purpleteam` | `1 2 3 4 4b 5 6 7 8 9 A G W C E S` | cloud + SaaS posture | Everything: offense + defense. |
+| `full` | all | cloud + SaaS posture + Prowler | Maximum coverage, deep CSPM. |
+| `web` | `2 3 5 6 8 C` | — | Web-facing surface only. |
+| `cloud` | `A G W` | cloud posture | Cloud annexes only. |
+| `intel` | `6 7 9` | — | Historical URLs, Shodan/CVE, breaches, secret leaks. |
+| `saas` | `E S` | SaaS posture | Anonymous exposure + authenticated SaaS posture. |
+
+Aliases: `osint → passive`, `redteam`/`attacker → external`, `leaks → intel`.
+
+Behavior:
+
+- Phase `T` (triage/report) is always appended.
+- A profile treats its phases as **explicit**, so opt-in phases (cloud `A/G/W`,
+  content `C`, SaaS exposure `E`) run even without provider config — e.g.
+  `blueteam` queries the active Azure tenant.
+- Posture toggles (`cloud_posture`, `saas_posture`, `use_prowler`) are turned on
+  as the profile specifies; a scope value or CLI flag that enables them still
+  applies too.
+- An explicit `-p` **overrides** the profile's phase list (the toggles still
+  apply). Combine with other flags freely, e.g. `--profile external -q -y`.
 
 ## Authorization gate
 

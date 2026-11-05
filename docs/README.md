@@ -41,6 +41,13 @@ python3 scylax.py -s scopes/acme.toml -P
 python3 scylax.py -s scopes/acme.toml
 ```
 
+Or pick a [profile](usage.md#profiles) instead of listing phases by hand:
+
+```bash
+python3 scylax.py --profile list                      # see all presets
+python3 scylax.py -s scopes/acme.toml --profile light # safe active recon, no port scans
+```
+
 Open `runs/acme/<date>/report.html` for the dashboard.
 
 ## Golden rules

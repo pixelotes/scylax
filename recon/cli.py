@@ -12,7 +12,18 @@ import tempfile
 from pathlib import Path
 from typing import Sequence
 
-from recon.config import ACTIVE_PHASES, DEFAULT_PHASES, RunContext, ScopeConfig, validate_scope
+from recon.config import (
+    ACTIVE_PHASES,
+    DEFAULT_PHASES,
+    PROFILE_ALIASES,
+    PROFILES,
+    RunContext,
+    ScopeConfig,
+    profile_names,
+    profile_phases,
+    resolve_profile,
+    validate_scope,
+)
 from recon import checkpoint, redact
 from recon.deps import DependencyManager
 from recon.phases import PHASE_MAP, active, cloud, osint, saas, triage
@@ -86,6 +97,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--phases",
         default=os.environ.get("PHASES", " ".join(DEFAULT_PHASES)),
         help='space-separated phases string (default: $PHASES or "%(default)s")',
+    )
+    parser.add_argument(
+        "--profile",
+        default=os.environ.get("PROFILE", "").strip(),
+        metavar="NAME",
+        help="phase-group preset (e.g. passive, light, external, blueteam, purpleteam, full, "
+             "web, cloud, intel, saas; or $PROFILE). Sets phases and posture toggles; "
+             "an explicit -p overrides the phases. Use '--profile list' to see them all.",
     )
     parser.add_argument(
         "-d",
@@ -323,6 +342,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     log = Logger()
 
+    # 0. List available phase-group profiles and exit
+    if args.profile.strip().lower() in ("list", "help", "?"):
+        print("Available --profile presets (phase T is always appended):\n")
+        for name, cfg in PROFILES.items():
+            print(f"  {name:11} {' '.join(profile_phases(name))}")
+            toggles = [t for t in ("cloud_posture", "saas_posture", "use_prowler") if cfg.get(t)]
+            if toggles:
+                print(f"              toggles: {', '.join(toggles)}")
+            print(f"              {cfg['desc']}")
+        if PROFILE_ALIASES:
+            print("\nAliases: " + ", ".join(f"{a} -> {t}" for a, t in PROFILE_ALIASES.items()))
+        return 0
+
     # 1. Immediate dependency check
     if args.check_deps:
         dm = DependencyManager(use_docker=args.docker)
@@ -396,6 +428,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Cloud annexes named explicitly (-p or $PHASES) run even without provider config.
     explicit_phases = args.phases != " ".join(DEFAULT_PHASES)
 
+    # A --profile preset selects the phases (unless -p was given explicitly) and
+    # enables its posture toggles. Treating the profile as explicit lets its
+    # opt-in phases (A/G/W, C, E) run just as naming them with -p would.
+    profile_cfg: dict = {}
+    if args.profile:
+        try:
+            profile_cfg = resolve_profile(args.profile)
+        except KeyError:
+            log.error(
+                f"Unknown profile '{args.profile}'. Available: "
+                f"{', '.join(profile_names())} (see --profile list)."
+            )
+            return 1
+        if not explicit_phases:
+            phases = profile_phases(args.profile)
+        explicit_phases = True
+        log.info(f"Profile '{args.profile.lower().strip()}': phases {' '.join(phases)}")
+
     dry_dir: str | None = None
     if args.dry_run:
         # Nothing is executed or written to the real runs folder; triage has nothing to triage.
@@ -419,9 +469,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         yes=args.yes,
         shodan_api_key=(args.shodan_key or scope.shodan_api_key or os.environ.get("SHODAN_API_KEY", "")).strip(),
         hibp_api_key=(args.hibp_key or scope.hibp_api_key or os.environ.get("HIBP_API_KEY", "")).strip(),
-        cloud_posture=bool(args.cloud_posture or scope.cloud_posture),
-        use_prowler=bool(args.use_prowler or scope.use_prowler),
-        saas_posture=bool(args.saas_posture or scope.saas_posture),
+        cloud_posture=bool(args.cloud_posture or scope.cloud_posture or profile_cfg.get("cloud_posture")),
+        use_prowler=bool(args.use_prowler or scope.use_prowler or profile_cfg.get("use_prowler")),
+        saas_posture=bool(args.saas_posture or scope.saas_posture or profile_cfg.get("saas_posture")),
         quick_scan=bool(args.quick or scope.quick_scan),
         explicit_phases=explicit_phases,
         resume=args.resume,
