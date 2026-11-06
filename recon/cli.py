@@ -81,6 +81,80 @@ def _get_egress_ip() -> str:
     return "unknown"
 
 
+def _doctor_integrations(scope: ScopeConfig, log: Logger) -> None:
+    """Report which optional integrations are configured for a scope."""
+    def mark(name: str, present: bool, how: str) -> None:
+        if present:
+            log.ok(f"  {name}: configured")
+        else:
+            log.info(f"  {name}: not set ({how})")
+
+    shodan = (scope.shodan_api_key or os.environ.get("SHODAN_API_KEY", "")).strip()
+    hibp = (scope.hibp_api_key or os.environ.get("HIBP_API_KEY", "")).strip()
+    nvd = (scope.intel_keys.get("nvd_api_key", "") or os.environ.get("NVD_API_KEY", "")).strip()
+    log.info("Integrations / API keys:")
+    mark("Shodan", bool(shodan), "phase 7 host lookup; SHODAN_API_KEY or [targets] shodan_api_key")
+    mark("HaveIBeenPwned", bool(hibp), "breach audit; HIBP_API_KEY or [targets] hibp_api_key")
+    mark("NVD", bool(nvd), "faster CVE lookups; NVD_API_KEY or [intel] nvd_api_key")
+    mark("Alert webhook", bool(notify.webhook_url(scope)), "run & finding alerts; alert_webhook or SCYLAX_ALERT_WEBHOOK")
+
+
+def _doctor(args: argparse.Namespace, log: Logger) -> int:
+    """One-shot environment & scope health check. Returns 0 when nothing blocks a
+    run, 1 when there is a blocking problem (missing required tool, or a scope that
+    is absent or invalid)."""
+    log.info("Scylax doctor - environment & scope health check")
+    blocking = 0
+
+    log.ok(f"Python {sys.version.split()[0]}")
+    if have("docker"):
+        log.ok("Docker available (containerised tools usable with --docker)")
+    else:
+        log.info("Docker not found (optional; install it to run tools with --docker)")
+
+    log.info("Dependencies (all phases):")
+    dm = DependencyManager(use_docker=args.docker)
+    statuses = dm.check_all()
+    if not dm.print_report(statuses):
+        blocking += 1
+
+    log.info("Scope:")
+    scope_path = Path(args.scope)
+    if not scope_path.is_file():
+        log.error(f"Scope file not found: {scope_path}")
+        log.info("  create one:  cp scopes/example.toml scopes/<name>.toml   (then edit it)")
+        blocking += 1
+    else:
+        errors, warnings = validate_scope(scope_path)
+        for w in warnings:
+            log.warn(w)
+        for e in errors:
+            log.error(e)
+        if errors:
+            blocking += 1
+        try:
+            scope = ScopeConfig.load(scope_path)
+        except Exception as exc:
+            log.error(f"Could not load scope: {exc}")
+            blocking += 1
+        else:
+            auth = "authorised" if scope.authorised_by else "NO authorisation set"
+            log.ok(f"{scope.path}: {len(scope.domains)} domain(s), {len(scope.hvt_ips)} HVT IP(s), {auth}")
+            if not scope.authorised_by:
+                log.warn("authorised_by is empty - active phases will be refused (use -P / --passive-only)")
+            _doctor_integrations(scope, log)
+
+    log.info(f"Egress IP (what targets will see): {_get_egress_ip()}")
+
+    log.info("Next:")
+    if blocking:
+        log.warn(f"{blocking} blocking issue(s) above - fix them before a full run.")
+    scope_hint = args.scope if scope_path.is_file() else "scopes/<name>.toml"
+    log.info(f"  preview a run:  python3 scylax.py -s {scope_hint} --profile light --dry-run")
+    log.info(f"  run it:         python3 scylax.py -s {scope_hint} --profile light")
+    return 1 if blocking else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser with flags, environment variable defaults, and help text."""
     parser = argparse.ArgumentParser(
@@ -216,6 +290,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--check-config",
         action="store_true",
         help="validate the scope file (unknown keys, missing files, empty sections) and exit",
+    )
+    parser.add_argument(
+        "--doctor",
+        action="store_true",
+        help="one-shot health check: Python, tools, scope, API keys, egress IP, and the "
+             "command to run next; then exit (0 if nothing blocks a run, 1 otherwise)",
     )
     parser.add_argument(
         "--report-only",
@@ -446,6 +526,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif not errors:
             log.ok(f"{args.scope}: {len(warnings)} warning(s), no errors")
         return 1 if errors else 0
+
+    # 1c. Full environment & scope health check
+    if args.doctor:
+        return _doctor(args, log)
 
     # 2. Report only regeneration
     if args.report_only:

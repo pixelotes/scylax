@@ -124,7 +124,13 @@ image assembles cleanly.
 ## Verifying your setup
 
 ```bash
-python3 scylax.py --check-deps          # tools, mode, versions
-python3 scylax.py -s scopes/acme.toml --check-config   # validate the scope file
+python3 scylax.py --doctor -s scopes/acme.toml   # everything at once: tools + scope + keys + egress + next step
+python3 scylax.py --check-deps                   # just tools, mode, versions
+python3 scylax.py -s scopes/acme.toml --check-config   # just validate the scope file
 python3 -m unittest discover -s tests -v               # run the test suite (no network)
 ```
+
+`--doctor` is the one-shot check: it runs the dependency table and the scope
+validation together, lists which API-key integrations are active, shows your egress
+IP, and prints the command to run next. It exits `0` when nothing blocks a run and
+`1` otherwise, so it also works as a pre-flight gate in a script.

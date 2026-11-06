@@ -8,6 +8,21 @@ With no `-p`, Scylax runs the full default phase list. Cloud (A/G/W), SaaS (S),
 and content discovery (C) are **opt-in** and auto-skip unless configured or named
 explicitly. See [phases.md](phases.md) for what each phase does.
 
+## First, run the doctor
+
+Before a real run, `--doctor` checks everything in one shot — Python version,
+every tool (native vs Docker), your scope file (validation + a quick summary),
+which API-key integrations are active, your egress IP, and the exact command to
+run next:
+
+```bash
+python3 scylax.py --doctor -s scopes/<name>.toml
+```
+
+It exits `0` when nothing blocks a run and `1` when something must be fixed first
+(a missing required tool, or a scope that is absent or invalid). `--check-deps`
+and `--check-config` are the narrower, single-purpose versions.
+
 ## CLI flags
 
 | Flag | Env | Meaning |
@@ -29,6 +44,7 @@ explicitly. See [phases.md](phases.md) for what each phase does.
 | `-D`, `--docker` | `USE_DOCKER=1` | Run supported tools from containers. |
 | `--shodan-key` | `SHODAN_API_KEY` | Shodan API key (phase 7). |
 | `--hibp-key` | `HIBP_API_KEY` | HaveIBeenPwned key (phase 9). |
+| `--doctor` | — | One-shot health check (Python, tools, scope, API keys, egress, next step) and exit; `0` if nothing blocks a run, else `1`. |
 | `--check-deps` | — | Show tool availability (native/Docker) and exit. |
 | `--check-config` | — | Validate the scope file and exit. |
 | `--report-only DIR` | — | Rebuild `report.md`/`.html` for an existing run and exit. |

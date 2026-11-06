@@ -186,7 +186,16 @@ To protect your host machine from environment pollution, Scylax automatically de
   ./scylax.py -s scopes/example.toml --no-venv
   ```
 
-Check your environment at any time with `--check-deps`:
+Check your whole setup at once with `--doctor` — Python, tools, your scope file,
+which API-key integrations are active, your egress IP, and the command to run next:
+
+```bash
+./scylax.py --doctor -s scopes/<name>.toml
+```
+
+It exits `0` when nothing blocks a run and `1` when something must be fixed first
+(missing required tool, or a scope that is absent or invalid). For the tool table
+alone, use `--check-deps`; to validate a scope file alone, `--check-config`:
 
 ```bash
 ./scylax.py --check-deps
@@ -347,7 +356,7 @@ Key settings in `scopes/example.toml`:
 ## Running it
 
 ```text
-./scylax.py -s SCOPE_FILE [--profile NAME] [-p "PHASES"] [-d DATE] [-P] [-q | -qq] [-n] [-y] [-D] [--no-venv] [--cloud-posture] [--saas-posture] [--prowler] [--check-deps] [--check-config] [--report-only DIR] [--report-from-bundle FILE] [--export DIR]
+./scylax.py -s SCOPE_FILE [--profile NAME] [-p "PHASES"] [-d DATE] [-P] [-q | -qq] [-n] [-y] [-D] [--no-venv] [--cloud-posture] [--saas-posture] [--prowler] [--doctor] [--check-deps] [--check-config] [--report-only DIR] [--report-from-bundle FILE] [--export DIR]
 ```
 
 | Option | Meaning |
@@ -372,6 +381,7 @@ Key settings in `scopes/example.toml`:
 | `-D`, `--docker` | Run supported tools via Docker containers instead of native binaries |
 | `--dry-run` | List the commands and HTTP requests each phase would issue, run nothing and write no evidence. Commands that depend on earlier phases' results, and requests that are only made after a first response qualifies, cannot be listed |
 | `--resume` | Skip phases already completed (with no tool failure) in this run folder; editing the scope file invalidates them. `gaps.txt` is kept, so gaps accumulate |
+| `--doctor` | One-shot health check (Python, tools, scope, API keys, egress IP, next command) and exit; `0` if nothing blocks a run, `1` otherwise |
 | `--check-deps` | Print dependency status table and exit |
 | `--check-config` | Validate the scope file (unknown keys, missing files, empty sections) and exit |
 | `--report-only DIR` | Regenerate `report.md` and `report.html` for an existing run folder |
@@ -410,9 +420,9 @@ Azure tenant. Aliases: `osint→passive`, `redteam/attacker→external`, `leaks�
 
 ### Typical workflow
 
-1. **Verify dependencies:**
+1. **Check your setup** (tools, scope, keys, egress, next step):
    ```bash
-   ./scylax.py --check-deps
+   ./scylax.py --doctor -s scopes/acme.toml
    ```
 
 2. **Passive discovery first** (DNS, WHOIS, CT logs, Wayback, Shodan, target IP auto-discovery):
