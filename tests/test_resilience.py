@@ -25,6 +25,7 @@ engagement = "Resilience Test"
 authorised_by = "Tester"
 authorisation_ref = "REF1"
 runs_dir = "{runs}"
+alert_webhook = "{webhook}"
 
 [targets]
 domains = ["test.example.com"]
@@ -42,10 +43,10 @@ class _ResilienceCase(unittest.TestCase):
         cli.PHASE_MAP = self._orig_phase_map
         cli.preflight = self._orig_preflight  # type: ignore[assignment]
 
-    def _scope_file(self, root: Path) -> Path:
+    def _scope_file(self, root: Path, webhook: str = "") -> Path:
         runs = root / "runs"
         p = root / "restest.toml"
-        p.write_text(_SCOPE_TOML.format(runs=runs.as_posix()), encoding="utf-8")
+        p.write_text(_SCOPE_TOML.format(runs=runs.as_posix(), webhook=webhook), encoding="utf-8")
         return p
 
     def _patch_phases(self, sixth) -> None:
@@ -63,7 +64,7 @@ class _ResilienceCase(unittest.TestCase):
             scope = self._scope_file(root)
             rc = cli.main(["-s", str(scope), "-d", "2026-11-06", "-p", "6 T", "-y", "--no-venv"])
 
-            self.assertEqual(rc, 0)  # the run completed despite the crash
+            self.assertEqual(rc, 2)  # finished despite the crash -> partial exit code
             run_dir = root / "runs" / "restest" / "2026-11-06"
             self.assertTrue((run_dir / "report.html").is_file())  # triage still ran
             # the crash was recorded so triage won't treat phase 6 as resolved
@@ -84,6 +85,34 @@ class _ResilienceCase(unittest.TestCase):
             self.assertEqual(rc, 130)  # interrupted
             run_dir = root / "runs" / "restest" / "2026-11-06"
             self.assertTrue((run_dir / "report.html").is_file())  # salvaged a report
+
+    def test_clean_run_exits_zero(self) -> None:
+        self._patch_phases(lambda ctx, dm, log: None)  # phase 6 does nothing, no crash
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            scope = self._scope_file(root)
+            rc = cli.main(["-s", str(scope), "-d", "2026-11-06", "-p", "6 T", "-y", "--no-venv"])
+            self.assertEqual(rc, 0)
+            self.assertTrue((root / "runs" / "restest" / "2026-11-06" / "report.html").is_file())
+
+    def test_crash_sends_failure_alert(self) -> None:
+        def boom(ctx, dm, log):
+            raise RuntimeError("kaboom")
+
+        calls: list[dict] = []
+        orig = cli.notify.post_run_failure
+        cli.notify.post_run_failure = lambda *a, **k: (calls.append(k) or (True, "alert sent"))  # type: ignore[assignment]
+        try:
+            self._patch_phases(boom)
+            with tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                scope = self._scope_file(root, webhook="https://hook.example/x")
+                cli.main(["-s", str(scope), "-d", "2026-11-06", "-p", "6 T", "-y", "--no-venv"])
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0]["crashed"], ["6"])
+            self.assertFalse(calls[0]["interrupted"])
+        finally:
+            cli.notify.post_run_failure = orig  # type: ignore[assignment]
 
     def test_recovery_hints_mention_resume_and_report_only(self) -> None:
         from recon.config import RunContext, ScopeConfig
@@ -130,6 +159,57 @@ class _ResilienceCase(unittest.TestCase):
             fails = load_tool_failures(ctx.run_dir)
             self.assertTrue(any(ph == "6" and "ValueError" in why for ph, _t, why in fails))
             self.assertIn("crashed", (ctx.console_dir / "6.log").read_text(encoding="utf-8"))
+
+
+class TestRunFailureAlert(unittest.TestCase):
+    """notify.post_run_failure (point 5): alert a webhook on a failed/aborted run."""
+
+    def _scope(self, webhook: str = ""):
+        from recon.config import ScopeConfig
+        return ScopeConfig(path=Path("s.toml"), name="s", engagement="s", alert_webhook=webhook)
+
+    def test_no_webhook_not_attempted(self) -> None:
+        from recon import notify
+        attempted, _ = notify.post_run_failure(self._scope(), "s", "2026-11-06", crashed=["6"])
+        self.assertFalse(attempted)
+
+    def test_clean_run_not_attempted(self) -> None:
+        from recon import notify
+        attempted, msg = notify.post_run_failure(self._scope("https://hook"), "s", "2026-11-06")
+        self.assertFalse(attempted)
+        self.assertIn("cleanly", msg)
+
+    def _post_and_capture(self, **kw) -> str:
+        from unittest import mock
+        from recon import notify
+
+        captured: dict = {}
+
+        class _R:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        def fake_urlopen(req, timeout=0):
+            captured["body"] = req.data.decode("utf-8")
+            return _R()
+
+        with mock.patch.object(notify.urllib.request, "urlopen", fake_urlopen):
+            attempted, _ = notify.post_run_failure(
+                self._scope("https://hook.example/x"), "acme", "2026-11-06", **kw)
+        self.assertTrue(attempted)
+        return captured["body"]
+
+    def test_interrupted_card(self) -> None:
+        body = self._post_and_capture(interrupted=True)
+        self.assertIn("INTERRUPTED", body)
+        self.assertIn("acme", body)
+
+    def test_crashed_card_names_phases(self) -> None:
+        body = self._post_and_capture(crashed=["6", "8"], run_dir="/runs/acme/2026-11-06")
+        self.assertIn("failed phase", body)
+        self.assertIn("6, 8", body)
+        self.assertIn("/runs/acme/2026-11-06", body)
 
 
 if __name__ == "__main__":

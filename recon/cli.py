@@ -25,7 +25,7 @@ from recon.config import (
     resolve_profile,
     validate_scope,
 )
-from recon import checkpoint, redact
+from recon import checkpoint, notify, redact
 from recon.deps import DependencyManager
 from recon.phases import PHASE_MAP, active, cloud, osint, saas, triage
 from recon.ai_bundle import report_from_bundle
@@ -297,6 +297,21 @@ def _print_recovery_hints(ctx: RunContext, log: Logger, *, interrupted: bool, cr
     log.info("Recovery:")
     log.info(f"  resume what's left:  python3 scylax.py -s {ctx.scope.path} -d {ctx.run_date} --resume")
     log.info(f"  rebuild the report:  python3 scylax.py --report-only {ctx.run_dir}")
+
+
+def _alert_run_failure(ctx: RunContext, log: Logger, *, interrupted: bool, crashed: Sequence[str]) -> None:
+    """Best-effort webhook alert that the run did not finish cleanly. Never raises."""
+    if not notify.webhook_url(ctx.scope):
+        return
+    try:
+        attempted, msg = notify.post_run_failure(
+            ctx.scope, ctx.scope.name, ctx.run_date,
+            interrupted=interrupted, crashed=list(crashed), run_dir=str(ctx.run_dir),
+        )
+        if attempted:
+            log.info(f"Failure alert: {msg}")
+    except Exception as exc:
+        log.warn(f"Could not send failure alert: {exc}")
 
 
 def preflight(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
@@ -642,8 +657,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if interrupted or crashed:
         _print_recovery_hints(ctx, log, interrupted=interrupted, crashed=crashed)
+        _alert_run_failure(ctx, log, interrupted=interrupted, crashed=crashed)
 
+    # Exit codes: 0 clean · 1 config/usage (returned earlier) · 2 a phase crashed
+    # but the run finished · 130 interrupted.
     if interrupted:
         return 130
+    if crashed:
+        log.warn(f"Done with {len(crashed)} failed phase(s). Evidence: {ctx.run_dir}")
+        return 2
     log.ok(f"Done. Evidence: {ctx.run_dir}")
     return 0

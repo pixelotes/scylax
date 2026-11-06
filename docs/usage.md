@@ -181,6 +181,25 @@ python3 scylax.py -s scopes/acme.toml -d 2026-11-04 --resume
 python3 scylax.py --report-only runs/acme/2026-11-04
 ```
 
+When `alert_webhook` (or `SCYLAX_ALERT_WEBHOOK`) is configured, an interrupted run
+or a run with a crashed phase also posts a **failure alert** to the webhook — so an
+unattended, scheduled run tells you it did not finish cleanly, not just when it finds
+something.
+
+### Exit codes
+
+Scripts and cron can branch on the exit code:
+
+| Code | Meaning |
+|---|---|
+| `0` | Clean run. |
+| `1` | Configuration / usage error (bad scope, missing required dependency, aborted at the authorization prompt) — nothing scanned. |
+| `2` | The run finished but **one or more phases crashed** (their findings are *not re-checked*; see `tool_failures.tsv`). |
+| `130` | Interrupted with Ctrl-C (a report was still salvaged). |
+
+Missing optional tools or API keys degrade a phase without changing the exit code —
+those are recorded in `gaps.txt` / `tool_failures.tsv`, not treated as a run failure.
+
 ## Monthly runs (CTEM)
 
 Scylax is built for continuous threat-exposure management: run it on a schedule
