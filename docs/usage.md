@@ -162,6 +162,25 @@ python3 scylax.py --export runs/acme/2026-11-04
 `report_data.json` is produced on every run too; `--export` just regenerates it on
 its own. See [outputs](outputs.md#the-consolidated-export-report_datajson) for the schema.
 
+## When a run is interrupted or a phase fails
+
+The pipeline is built so you never lose work:
+
+- **A phase whose code crashes** is contained — the remaining phases still run, and
+  the crash is recorded in `tool_failures.tsv` so triage marks that phase's findings
+  *not re-checked*, never *resolved*. The run finishes and still produces a report.
+- **Ctrl-C** stops cleanly and still builds a report from the evidence collected so
+  far (exit code `130`), instead of leaving the run half-written with no report.
+- Either way, Scylax prints the exact **recovery commands** on exit:
+
+```bash
+# continue the phases that didn't finish (completed phases are skipped)
+python3 scylax.py -s scopes/acme.toml -d 2026-11-04 --resume
+
+# or just rebuild the report from whatever was collected
+python3 scylax.py --report-only runs/acme/2026-11-04
+```
+
 ## Monthly runs (CTEM)
 
 Scylax is built for continuous threat-exposure management: run it on a schedule

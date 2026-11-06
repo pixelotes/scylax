@@ -16,4 +16,10 @@ from recon.venv_manager import ensure_venv
 if __name__ == "__main__":
     ensure_venv(_repo_root)
     from recon.cli import main
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        # An interrupt outside a running phase (preflight, a prompt, setup). The
+        # phase loop handles its own interrupts and still salvages a report.
+        sys.stderr.write("\nInterrupted.\n")
+        sys.exit(130)

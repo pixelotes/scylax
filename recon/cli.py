@@ -9,6 +9,7 @@ import re
 import shutil
 import sys
 import tempfile
+import traceback
 from pathlib import Path
 from typing import Sequence
 
@@ -30,7 +31,7 @@ from recon.phases import PHASE_MAP, active, cloud, osint, saas, triage
 from recon.ai_bundle import report_from_bundle
 from recon.export import export_report_data
 from recon.report import generate_reports
-from recon.runner import DRY_RUN, TOOL_FAILURES_FILE, Logger, dry_run_active, dry_run_report, have, http_get, load_tool_failures, reset_phase_console
+from recon.runner import DRY_RUN, TOOL_FAILURES_FILE, Logger, dry_run_active, dry_run_report, have, http_get, load_tool_failures, record_tool_failure, reset_phase_console
 from recon.resilience import BREAKERS
 from recon.venv_manager import ensure_venv
 
@@ -247,6 +248,55 @@ def _clear_tool_failures(run_dir: Path, phase: str) -> None:
     if path.is_file():
         keep = [l for l in path.read_text(encoding="utf-8").splitlines() if l.split("\t", 1)[0] != phase]
         path.write_text("".join(f"{l}\n" for l in keep), encoding="utf-8")
+
+
+def _record_phase_crash(ctx: RunContext, phase: str, exc: BaseException, log: Logger) -> None:
+    """Contain a phase's own crash: record it as a tool failure (so triage treats
+    its findings as not re-checked, never resolved) and append the traceback to the
+    phase log for debugging. Never raises."""
+    summary = f"crashed: {type(exc).__name__}: {exc}"
+    try:
+        record_tool_failure(ctx.run_dir, phase, f"phase-{phase}", redact.redact(summary))
+    except Exception:
+        pass
+    try:
+        ctx.console_dir.mkdir(parents=True, exist_ok=True)
+        with (ctx.console_dir / f"{phase}.log").open("a", encoding="utf-8") as fh:
+            fh.write(f"\n[scylax] phase {phase} crashed:\n{redact.redact(traceback.format_exc())}\n")
+    except Exception:
+        pass
+
+
+def _salvage_report(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
+    """Produce a report from whatever evidence exists when triage did not run
+    (interrupted, crashed, or stopped before phase T). Best-effort: tries a fresh
+    triage first, then a plain report build, and never raises."""
+    log.info("Producing a report from the evidence collected so far...")
+    try:
+        reset_phase_console(ctx.console_dir, "T")
+    except Exception:
+        pass
+    try:
+        DRY_RUN.phase = "T"
+        PHASE_MAP["T"](ctx, dm, log)
+        log.ok(f"Report generated from partial evidence: {ctx.run_dir}")
+        return
+    except Exception as exc:
+        log.error(f"Triage on partial evidence failed ({type(exc).__name__}: {exc}); building a plain report")
+    try:
+        generate_reports(ctx.run_dir)
+        log.ok(f"Report generated: {ctx.run_dir}")
+    except Exception as exc:
+        log.error(f"Could not generate any report: {exc}")
+
+
+def _print_recovery_hints(ctx: RunContext, log: Logger, *, interrupted: bool, crashed: Sequence[str]) -> None:
+    """Tell the user exactly how to pick up an incomplete run."""
+    if crashed:
+        log.warn(f"Phases that crashed: {', '.join(crashed)} - their findings are marked not re-checked, not resolved")
+    log.info("Recovery:")
+    log.info(f"  resume what's left:  python3 scylax.py -s {ctx.scope.path} -d {ctx.run_date} --resume")
+    log.info(f"  rebuild the report:  python3 scylax.py --report-only {ctx.run_dir}")
 
 
 def preflight(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
@@ -534,6 +584,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     BREAKERS.reset()
     scope_sig = checkpoint.scope_signature(scope_path)
+    interrupted = False
+    crashed: list[str] = []
+    t_done = False
     try:
         for p in ctx.phases:
             reason = ctx.phase_skip_reason(p)
@@ -551,12 +604,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             reset_phase_console(ctx.console_dir, p)
             _clear_tool_failures(ctx.run_dir, p)
             checkpoint.clear(ctx.run_dir, p)
-            fn(ctx, dm, log)
+            try:
+                fn(ctx, dm, log)
+            except KeyboardInterrupt:
+                interrupted = True
+                log.warn(f"Interrupted during phase {p} - stopping and salvaging a report from the evidence so far")
+                break
+            except Exception as exc:
+                # The phase's own code crashed (not an external tool, which run_cmd
+                # already contains). Keep the remaining phases and the report alive.
+                crashed.append(p)
+                _record_phase_crash(ctx, p, exc, log)
+                log.error(f"Phase {p} crashed ({type(exc).__name__}: {exc}) - continuing with the remaining phases")
+                continue
             failed = [(tool, why) for ph, tool, why in load_tool_failures(ctx.run_dir) if ph == p]
             for tool, why in failed:
                 log.warn(f"{tool} failed in phase {p} ({why}) - its results are missing; findings it would report are not re-checked")
             if not failed and not dry_run_active() and p != "T":
                 checkpoint.mark_done(ctx.run_dir, p, scope_sig)
+            if p == "T":
+                t_done = True
 
         if dry_run_active():
             print()
@@ -567,5 +634,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         if dry_dir:
             shutil.rmtree(dry_dir, ignore_errors=True)
 
+    # Never lose the report: if triage was requested but did not get to run (the run
+    # was interrupted, crashed, or stopped before phase T), build one from whatever
+    # evidence was collected.
+    if not dry_run_active() and "T" in ctx.phases and not t_done:
+        _salvage_report(ctx, dm, log)
+
+    if interrupted or crashed:
+        _print_recovery_hints(ctx, log, interrupted=interrupted, crashed=crashed)
+
+    if interrupted:
+        return 130
     log.ok(f"Done. Evidence: {ctx.run_dir}")
     return 0
