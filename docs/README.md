@@ -13,7 +13,7 @@ the deep-dive reference.
 
 | Page | What it covers |
 |---|---|
-| [installation.md](installation.md) | Dependencies, the `.venv` manager, Docker mode, the all-in-one Docker image, and `--check-deps`. |
+| [installation.md](installation.md) | Dependencies, the `.venv` manager, Docker mode, the all-in-one Docker image, and the `--doctor` / `--check-deps` health checks. |
 | [configuration.md](configuration.md) | The scope `.toml` file: every key by section, environment variables, and `--check-config`. |
 | [usage.md](usage.md) | CLI flags, phase selection, passive vs. active runs, authorization gates, and worked examples. |
 | [phases.md](phases.md) | What each phase (1–9, A/G/W, S, C, T) does, its tools, and its mode. |

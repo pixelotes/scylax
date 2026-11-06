@@ -49,7 +49,7 @@ def ensure_venv(
         return False
 
     # 3. Allow informational commands (--help, --check-deps, --report-only) to display without prompting
-    if any(h in args for h in ("-h", "--help", "--check-deps", "--report-only")):
+    if any(h in args for h in ("-h", "--help", "--check-deps", "--check-config", "--doctor", "--report-only")):
         return False
 
     venv_dir = repo_root / ".venv"
