@@ -218,8 +218,12 @@ sudo apt update && sudo apt install -y nmap dnsutils whois
 
 **macOS (`Homebrew`):**
 ```bash
-brew install subfinder dnsx httpx nuclei trufflehog theharvester spiderfoot gh
+brew install subfinder dnsx nuclei trufflehog theharvester spiderfoot gh
+go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest   # not `brew install httpx`
 ```
+
+> [!WARNING]
+> Do **not** `brew install httpx`: that formula is the unrelated Python HTTP client and has no `-l`/`-version`. Install ProjectDiscovery's with Go: `go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest` and put `~/go/bin` first in `PATH`.
 
 **Linux (`Go` / `apt`):**
 ```bash
