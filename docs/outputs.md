@@ -12,8 +12,11 @@ runs/<scope>/<date>/
   report.html              Interactive dark-mode dashboard (tabs + CLI terminal explorer + Assets tab)
   report.md                Full Markdown report with collapsible CLI evidence
   report_data.json         Consolidated, versioned export: assets + findings + relations + meta (see below)
+  findings.sarif           SARIF 2.1.0 export of the findings (see below)
+  findings.csv             CSV export of the findings (see below)
   ai_bundle.md             Compact, self-contained companion for LLM analysis (see below)
   findings_auto.md / .tsv  Prioritised finding candidates (Asset ID + Target columns; rows grouped by asset)
+  suppressed.md / .tsv     Candidates hidden by an auditor suppression: severity, finding, target, reason, owner, expires, ticket
   assets.tsv               Asset inventory: id, type, label, key, product/version, open ports, findings, CVEs
   diff.md                  New / Reappeared / Resolved / Not re-checked / Persisting vs. previous run
   run.meta                 Scope, date, authorisation, phases, Docker mode, egress IP
@@ -49,9 +52,44 @@ that, `diff.md` classifies each finding relative to the previous run:
 | **Resolved** | Present last run, gone now — **only** if the producing phase ran in both runs. |
 | **Not re-checked** | The phase/tool that would confirm it didn't run (see `tool_failures.tsv`). Never counted as resolved. |
 | **Persisting** | Present in both runs. |
+| **Suppressed (accepted)** | Newly covered by a suppression this run. Never counted as resolved or new. Shown only when it has entries. |
+| **Reactivated (suppression expired)** | Active again because its suppression expired (or was removed). Shown only when it has entries; high/critical ones are alerted like new findings. |
+
+### Summary block and trends
+
+`diff.md` opens with a **Summary**: net change in active findings (previous -> current),
+a per-severity table (new / reappeared / reactivated / resolved / persisting / net), the
+**MTTR**, open findings by age, and the five oldest open high/critical findings. The same
+numbers are written to `trends.json` (and into `report_data.json` as `trends`), and
+`report.html` / `report.md` show them as a "What changed since <date>" card at the top of
+the Overview (hidden when there is no previous run).
+
+- **Age** = days from `first_seen` to the run date, for every active finding, bucketed
+  `<30`, `30-90`, `90-180`, `>180` per severity.
+- **MTTR** = median days from `first_seen` to the resolution date, per severity, over
+  findings resolved in the last 90 days. A finding counts as resolved only on a run that
+  actually checked it (its phase ran and its tool did not fail); "not re-checked" never
+  counts. The resolution date is therefore an **upper bound** on the real fix date, and a
+  finding that later reappears drops out of the MTTR.
+- `findings_history.json` gains a reserved top-level `__runs__` list (date, phases run,
+  failed tools per run) used to place resolution dates. Older files without it keep
+  working: runs are then inferred from the dates findings were seen on (phases unknown,
+  so assumed checked), which can overestimate time-to-resolve across runs that found
+  nothing.
 
 This "not re-checked ≠ resolved" rule is what makes the diff trustworthy across
 runs where a tool was temporarily unavailable.
+
+### Suppressed findings
+
+A suppression (see [configuration](configuration.md#finding-suppressions-suppressionstoml))
+moves a candidate out of the active outputs — `findings_auto.md`/`.tsv`,
+`findings.jsonl`, the KPIs and severity counts — into `suppressed.md` /
+`suppressed.tsv` and the **Suppressed** table of `report.md` (section 2a) and
+`report.html` (Findings tab), with its severity, reason, owner, expiry and
+ticket. `findings_auto.md` points to `suppressed.md` when anything is
+suppressed. Suppressed findings are still observed, so `findings_history.json`
+keeps recording them, and `report_data.json` lists them under `suppressed`.
 
 ## Assets
 
@@ -118,10 +156,12 @@ ignore unknown fields.
   "meta":     { engagement, scope, date, authorised_by, authorisation_ref, phases, egress_ip, use_docker },
   "kpis":     { critical, high, …, subdomains, live_web_hosts, cves_total, … },
   "summary":  { total_findings, total_assets, total_relations, severity_counts },
+  "trends":   { run_date, previous_run, counts, totals, net, age_buckets, mttr, oldest_open },  // {} without a previous run
   "diff":     { "New": [...], "Reappeared": [...], "Resolved": [...], "Not re-checked": [...], "Persisting": [...] },
   "assets":   [ { id, type, type_label, key, label, pseudo, cloud, ports, cves, finding_ids, worst_severity, … } ],
   "findings": [ { id, key, severity, title, evidence, target, asset_id, asset_ids, asset_keys } ],
-  "relations":[ { finding_id, asset_id, primary } ]
+  "relations":[ { finding_id, asset_id, primary } ],
+  "suppressed":[ { key, severity, title, evidence, target, reason, owner, expires, ticket } ]
 }
 ```
 
@@ -136,6 +176,38 @@ Regenerate it for an existing run without re-scanning:
 ```bash
 python3 scylax.py --export runs/<scope>/<date>/
 ```
+
+## Standard formats: `findings.sarif` and `findings.csv`
+
+Both are derived from `report_data.json` (the single source) and written every run
+right after it, and by `--export`. They are best-effort: a failure logs a warning
+and never breaks the run. Findings are **candidates** (`status: "candidate"`) for a
+human to validate, not verdicts.
+
+**`findings.sarif`** (SARIF 2.1.0, one `run`, tool `Scylax`): one `rule` per
+distinct finding rule (key prefix, e.g. `cors`; `nuclei:<template>` for nuclei) and
+one `result` per finding. Severity maps to `level`: critical/high -> `error`,
+medium -> `warning`, low/info -> `note` (rules also carry a GitHub
+`security-severity` score). Findings are about hosts and URLs, not source files, so
+`physicalLocation.artifactLocation.uri` is the URL when the target is one,
+`host:<host-or-ip[:port]>` otherwise (`scylax:tenant` when there is no target),
+plus a `logicalLocations` entry with the Scylax asset label. `partialFingerprints`
+(`scylaxFindingKey/v1`) hash the stable finding key, so trackers dedupe across
+runs. `properties` holds severity, asset ids, targets, CVEs, phase and status.
+
+**`findings.csv`** (RFC 4180, UTF-8 without BOM): columns `id, severity, title,
+rule, asset_ids, assets, targets, cves, phase, status, first_seen, age_days,
+evidence, suppression_reason, suppression_owner, suppression_expires,
+suppression_ticket`. Multi-values are joined with `; `. `first_seen`/`age_days` come from the
+scope's `findings_history.json` when present. Cells starting with `= + - @`, TAB
+or CR get a leading `'` to neutralise spreadsheet formula injection (evidence is
+untrusted internet data).
+
+**Suppressed findings** (see [suppressions](configuration.md)) are exported too,
+never dropped: in SARIF they carry a native `suppressions` entry (`kind: external`,
+`status: accepted`, justification = reason + owner, expiry and ticket) and
+`properties.status: "suppressed"`, so code-scanning tools show them as dismissed;
+in CSV their `status` is `suppressed` and the `suppression_*` columns are filled.
 
 ## The AI bundle (`ai_bundle.md`)
 
@@ -160,6 +232,7 @@ python3 scylax.py --report-from-bundle runs/<scope>/<date>/ai_bundle.md
 |---|---|
 | `assets.tsv` | Asset inventory: id, type, label, key, product/version, open ports, findings, CVEs. |
 | `report_data.json` | Consolidated, versioned export: meta, KPIs, assets, findings, and asset↔finding relations. |
+| `findings.sarif` / `findings.csv` | Standard-format exports of the findings (SARIF 2.1.0, CSV). |
 | `../assets.json` | Scope-level asset-id registry (stable ids across runs). |
 | `osint/new_subdomains.txt` | Subdomains first seen this run. |
 | `osint/ct_first_seen.tsv` | First certificate seen per host (certspotter fallback). |

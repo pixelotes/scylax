@@ -1,6 +1,7 @@
 # Real scopes contain target IPs and authorisation details; only the example is versioned
 scopes/*
 !scopes/example.toml
+!scopes/example.suppressions.toml
 
 # Assessment evidence and reports
 runs/

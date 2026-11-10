@@ -226,9 +226,14 @@ def build_report_data(data: Any) -> Dict[str, Any]:
             },
         },
         "diff": {k: list(v) for k, v in (getattr(data, "diff_summary", {}) or {}).items()},
+        # Trend metrics vs the previous run (see recon/trends.py); {} without one
+        "trends": dict(getattr(data, "trends", {}) or {}),
         "assets": assets_out,
         "findings": findings_out,
         "relations": relations,
+        # Auditor-suppressed candidates (not in findings/KPIs): key, severity, title,
+        # evidence, target, reason, owner, expires (YYYY-MM-DD), ticket
+        "suppressed": [dict(r) for r in (getattr(data, "suppressed", []) or [])],
     }
 
 
@@ -237,6 +242,12 @@ def write_report_data(data: Any, run_dir: Path) -> Path:
     doc = build_report_data(data)
     path = Path(run_dir) / "report_data.json"
     path.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    # Standard formats (SARIF, CSV) derived from the same document; best-effort.
+    try:
+        from recon.export_formats import write_findings_exports
+        write_findings_exports(doc, Path(run_dir))
+    except Exception:
+        pass
     return path
 
 
