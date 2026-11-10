@@ -888,15 +888,24 @@ def phase7(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                             }
                         )
 
-    # Cache for CVEDB queries
+    # Cache for CVEDB queries. Every successful lookup is also a unit
+    # ("<source>-cve:<id>" / "<source>-cpe:<cpe>") so --resume reuses it instead
+    # of re-querying the slow, throttled APIs; failed lookups are never saved.
     cpe_cache: dict[str, list[dict[str, Any]]] = {}
     cve_cache: dict[str, dict[str, Any]] = {}
+    cve_failed: set[str] = set()  # CVE ids whose CVEDB lookup failed in this run
+    lookup_units = checkpoint.Units(ctx, "7")
     # CVEDB (*.shodan.io) is often blocked by egress firewalls; fall back to NVD.
     cve_source = {"name": "cvedb", "down": False}
 
     def fetch_cve(cve_id: str) -> dict[str, Any]:
         if cve_id in cve_cache:
             return cve_cache[cve_id]
+        unit_key = f"cvedb-cve:{cve_id}"
+        saved = lookup_units.get(unit_key)
+        if isinstance(saved, dict):
+            cve_cache[cve_id] = saved
+            return saved
         cve_url = f"https://cvedb.shodan.io/cve/{cve_id}"
         st, data = http_get_json(cve_url, timeout=15)
         res_info = {
@@ -909,6 +918,9 @@ def phase7(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
             res_info["cvss"] = str(cvss_val) if cvss_val is not None else ""
             res_info["is_kev"] = bool(data.get("kev") or False)
             res_info["summary"] = str(data.get("summary") or "").strip()
+            lookup_units.mark(unit_key, res_info)
+        else:
+            cve_failed.add(cve_id)
         cve_cache[cve_id] = res_info
         return res_info
 
@@ -928,6 +940,17 @@ def phase7(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
         if cpe23 in cpe_cache:
             return cpe_cache[cpe23]
+        cvedb_key, nvd_key = f"cvedb-cpe:{cpe23}", f"nvd-cpe:{cpe_full}"
+        for key in (cvedb_key, nvd_key):  # --resume: an answer from either source
+            saved = lookup_units.get(key)
+            if isinstance(saved, list):
+                if key == nvd_key and not cve_source["down"]:
+                    # The interrupted run had already fallen back to NVD: do so
+                    # again (as a fresh run would), without re-probing CVEDB.
+                    cve_source.update(name="nvd", down=True)
+                    log.warn("Shodan CVEDB unreachable - falling back to NVD API (set NVD_API_KEY to speed it up)")
+                cpe_cache[cpe23] = saved
+                return saved
 
         items: list[dict[str, Any]] = []
         st, data = 0, None
@@ -941,6 +964,8 @@ def phase7(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
             nvd_st, items = nvd_cves_for_cpe(cpe_full)
             if nvd_st != 200:
                 log.warn(f"NVD lookup failed for {cpe_full} (HTTP {nvd_st})")
+            else:
+                lookup_units.mark(nvd_key, items)
             cpe_cache[cpe23] = items
             return items
         if st == 200 and data is not None:
@@ -980,6 +1005,10 @@ def phase7(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                                 "summary": c_info["summary"],
                             }
                         )
+            # Saved only when complete: a nested CVE lookup that failed left
+            # blank details that --resume must fill in.
+            if not any(it["cve_id"] in cve_failed for it in items):
+                lookup_units.mark(cvedb_key, items)
 
         cpe_cache[cpe23] = items
         return items
