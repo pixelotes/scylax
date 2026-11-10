@@ -17,11 +17,15 @@ mode (native vs. Docker) each tool will use, and the detected versions.
 
 ### Core (required for a full non-cloud run)
 
-Everything below is in Homebrew:
+Everything below is in Homebrew, except `httpx`:
 
 ```bash
-brew install nmap subfinder dnsx httpx nuclei amass gobuster gitleaks trufflehog theharvester
+brew install nmap subfinder dnsx nuclei amass gobuster gitleaks trufflehog theharvester
+go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest   # not `brew install httpx`
 ```
+
+> [!WARNING]
+> Do **not** `brew install httpx`: that formula is the unrelated Python HTTP client and has no `-l`/`-version`. Install ProjectDiscovery's with Go: `go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest` and put `~/go/bin` first in `PATH`.
 
 | Tool | Phase(s) | Role |
 |---|---|---|

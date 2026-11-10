@@ -2,10 +2,12 @@
 
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from recon.deps import DependencyManager, PHASE_DEPENDENCIES
 from recon.plugins import PLUGINS, get_plugin, list_plugins
 from recon.plugins.base import PluginKind
+from recon.runner import CmdResult
 
 
 class TestPluginsSystem(unittest.TestCase):
@@ -127,6 +129,39 @@ class TestPluginsSystem(unittest.TestCase):
             preflight(ctx, dm, log)
             self.assertTrue((ctx.run_dir / "run.meta").is_file())
             self.assertTrue((ctx.run_dir / "tool_versions.txt").is_file())
+
+
+class TestHttpxDetection(unittest.TestCase):
+    """`httpx` on PATH may be the Python client, not ProjectDiscovery's."""
+
+    def _check(self, res: CmdResult, docker: bool = False):
+        from recon.plugins import _check_httpx
+
+        def fake_have(name: str) -> bool:
+            return name == "httpx" or (name == "docker" and docker)
+
+        with mock.patch("recon.plugins.have", fake_have), \
+                mock.patch("recon.plugins.run_cmd", return_value=res):
+            return _check_httpx(False)
+
+    def test_python_client_rejected(self) -> None:
+        res = CmdResult(["httpx", "-version"], 2, "", "Usage: httpx [OPTIONS] URL\n\nError: No such option '-v'.")
+        ok, provider, detail = self._check(res)
+        self.assertFalse(ok)
+        self.assertIn("Python client", detail)
+
+    def test_projectdiscovery_accepted(self) -> None:
+        res = CmdResult(["httpx", "-version"], 0, "", "[INF] Current Version: v1.6.9\n")
+        ok, provider, detail = self._check(res)
+        self.assertTrue(ok)
+        self.assertEqual(provider, "native")
+        self.assertIn("Current Version", detail)
+
+    def test_python_client_falls_back_to_docker(self) -> None:
+        res = CmdResult(["httpx", "-version"], 2, "", "Usage: httpx [OPTIONS] URL")
+        ok, provider, _ = self._check(res, docker=True)
+        self.assertTrue(ok)
+        self.assertEqual(provider, "docker")
 
 
 if __name__ == "__main__":

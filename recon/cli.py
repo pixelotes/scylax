@@ -25,13 +25,16 @@ from recon.config import (
     resolve_profile,
     validate_scope,
 )
-from recon import checkpoint, notify, redact
+from recon import checkpoint, notify, redact, scheduler
 from recon.deps import DependencyManager
 from recon.phases import PHASE_MAP, active, cloud, osint, saas, triage
 from recon.ai_bundle import report_from_bundle
 from recon.export import export_report_data
 from recon.report import generate_reports
-from recon.runner import DRY_RUN, TOOL_FAILURES_FILE, Logger, dry_run_active, dry_run_report, have, http_get, load_tool_failures, record_tool_failure, reset_phase_console
+from recon.runner import (
+    DRY_RUN, STOP, TOOL_FAILURES_FILE, TOOL_FAILURES_LOCK, Logger, dry_run_active, dry_run_report, have, http_get,
+    load_tool_failures, record_tool_failure, reset_phase_console, set_log_phase,
+)
 from recon.resilience import BREAKERS
 from recon.venv_manager import ensure_venv
 
@@ -153,6 +156,16 @@ def _doctor(args: argparse.Namespace, log: Logger) -> int:
     log.info(f"  preview a run:  python3 scylax.py -s {scope_hint} --profile light --dry-run")
     log.info(f"  run it:         python3 scylax.py -s {scope_hint} --profile light")
     return 1 if blocking else 0
+
+
+def _positive_int(value: str) -> int:
+    try:
+        n = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected an integer >= 1, got {value!r}")
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"expected an integer >= 1, got {n}")
+    return n
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -279,7 +292,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--resume",
         action="store_true",
-        help="skip phases already completed (without tool failures) in this run folder; scope edits invalidate them",
+        help="skip phases already completed (without tool failures) in this run folder, and inside an unfinished phase "
+             "skip the units already done (per IP/batch/account); scope edits invalidate both",
+    )
+    parser.add_argument(
+        "--jobs",
+        type=_positive_int,
+        default=int(os.environ["SCYLAX_JOBS"]) if os.environ.get("SCYLAX_JOBS", "").strip().isdigit() else None,
+        metavar="N",
+        help="run up to N independent phases at once (default 1 = sequential; or SCYLAX_JOBS, or scope `jobs`). "
+             "Phases that send traffic to the targets never overlap, so traffic intensity does not increase",
     )
     parser.add_argument(
         "--check-deps",
@@ -325,9 +347,10 @@ def build_parser() -> argparse.ArgumentParser:
 def _clear_tool_failures(run_dir: Path, phase: str) -> None:
     """A phase that runs again starts with a clean failure record."""
     path = run_dir / TOOL_FAILURES_FILE
-    if path.is_file():
-        keep = [l for l in path.read_text(encoding="utf-8").splitlines() if l.split("\t", 1)[0] != phase]
-        path.write_text("".join(f"{l}\n" for l in keep), encoding="utf-8")
+    with TOOL_FAILURES_LOCK:
+        if path.is_file():
+            keep = [l for l in path.read_text(encoding="utf-8").splitlines() if l.split("\t", 1)[0] != phase]
+            path.write_text("".join(f"{l}\n" for l in keep), encoding="utf-8")
 
 
 def _record_phase_crash(ctx: RunContext, phase: str, exc: BaseException, log: Logger) -> None:
@@ -482,6 +505,64 @@ def preflight(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     )
     (ctx.run_dir / "run.meta").write_text(meta_content, encoding="utf-8")
     (ctx.run_dir / "tool_versions.txt").write_text(dm.tool_versions() + "\n", encoding="utf-8")
+
+
+def _resolve_jobs(args: argparse.Namespace, scope: ScopeConfig, log: Logger) -> int:
+    """--jobs, else scope `jobs`, else 1. A dry run is always sequential: its plan
+    attributes each command to the (single) current phase."""
+    jobs = args.jobs if args.jobs is not None else (getattr(scope, "jobs", None) or 1)
+    jobs = max(1, int(jobs))
+    if jobs > 1 and dry_run_active():
+        log.info("--dry-run lists phases one at a time: ignoring --jobs")
+        return 1
+    return jobs
+
+
+def _phase_runnable(ctx: RunContext, log: Logger, p: str, scope_sig: str, args: argparse.Namespace) -> bool:
+    """False (after saying why) for a phase that will not run in this invocation."""
+    reason = ctx.phase_skip_reason(p)
+    if reason:
+        log.info(f"skip phase {p} ({reason})")
+        return False
+    fn = PHASE_MAP.get(p)
+    if fn is None:
+        log.warn(f"unknown phase {p}")
+        return False
+    if args.resume and p != "T" and checkpoint.is_done(ctx.run_dir, p, scope_sig):
+        log.info(f"skip phase {p} (already completed in this run folder; --resume)")
+        return False
+    return True
+
+
+def _execute_phase(
+    ctx: RunContext, dm: DependencyManager, log: Logger, p: str, scope_sig: str, args: argparse.Namespace,
+) -> str:
+    """Run one phase with its prologue, crash containment, tool-failure check and
+    checkpoint; return a scheduler outcome. May run in a worker thread (--jobs)."""
+    fn = PHASE_MAP[p]
+    DRY_RUN.phase = p
+    if not args.resume:  # --resume keeps console evidence + finished units of an interrupted phase
+        reset_phase_console(ctx.console_dir, p)
+        checkpoint.clear_units(ctx.run_dir, p)
+    _clear_tool_failures(ctx.run_dir, p)  # re-recorded by the units that re-run
+    checkpoint.clear(ctx.run_dir, p)
+    try:
+        fn(ctx, dm, log)
+    except KeyboardInterrupt:
+        log.warn(f"Interrupted during phase {p} - stopping and salvaging a report from the evidence so far")
+        return scheduler.INTERRUPTED
+    except Exception as exc:
+        # The phase's own code crashed (not an external tool, which run_cmd
+        # already contains). Keep the remaining phases and the report alive.
+        _record_phase_crash(ctx, p, exc, log)
+        log.error(f"Phase {p} crashed ({type(exc).__name__}: {exc}) - continuing with the remaining phases")
+        return scheduler.CRASHED
+    failed = [(tool, why) for ph, tool, why in load_tool_failures(ctx.run_dir) if ph == p]
+    for tool, why in failed:
+        log.warn(f"{tool} failed in phase {p} ({why}) - its results are missing; findings it would report are not re-checked")
+    if not failed and not dry_run_active() and p != "T":
+        checkpoint.mark_done(ctx.run_dir, p, scope_sig)
+    return scheduler.FAILED if failed else scheduler.OK
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -678,51 +759,41 @@ def main(argv: Sequence[str] | None = None) -> int:
     dm = DependencyManager(use_docker=ctx.use_docker, run_dir=ctx.run_dir)
     preflight(ctx, dm, log)
 
-    # Phase dispatch table
-    phase_dispatch = PHASE_MAP
-
     BREAKERS.reset()
     scope_sig = checkpoint.scope_signature(scope_path)
+    jobs = _resolve_jobs(args, scope, log)
+    if jobs > 1:
+        log.info(f"Running up to {jobs} independent phases at a time; phases that send traffic "
+                 "to the targets still run one at a time")
     interrupted = False
     crashed: list[str] = []
     t_done = False
     try:
-        for p in ctx.phases:
-            reason = ctx.phase_skip_reason(p)
-            if reason:
-                log.info(f"skip phase {p} ({reason})")
-                continue
-            fn = phase_dispatch.get(p)
-            if fn is None:
-                log.warn(f"unknown phase {p}")
-                continue
-            if args.resume and p != "T" and checkpoint.is_done(ctx.run_dir, p, scope_sig):
-                log.info(f"skip phase {p} (already completed in this run folder; --resume)")
-                continue
-            DRY_RUN.phase = p
-            reset_phase_console(ctx.console_dir, p)
-            _clear_tool_failures(ctx.run_dir, p)
-            checkpoint.clear(ctx.run_dir, p)
+        def run_one(p: str) -> str:
+            if jobs > 1:
+                set_log_phase(p)
             try:
-                fn(ctx, dm, log)
-            except KeyboardInterrupt:
-                interrupted = True
-                log.warn(f"Interrupted during phase {p} - stopping and salvaging a report from the evidence so far")
-                break
-            except Exception as exc:
-                # The phase's own code crashed (not an external tool, which run_cmd
-                # already contains). Keep the remaining phases and the report alive.
-                crashed.append(p)
-                _record_phase_crash(ctx, p, exc, log)
-                log.error(f"Phase {p} crashed ({type(exc).__name__}: {exc}) - continuing with the remaining phases")
-                continue
-            failed = [(tool, why) for ph, tool, why in load_tool_failures(ctx.run_dir) if ph == p]
-            for tool, why in failed:
-                log.warn(f"{tool} failed in phase {p} ({why}) - its results are missing; findings it would report are not re-checked")
-            if not failed and not dry_run_active() and p != "T":
-                checkpoint.mark_done(ctx.run_dir, p, scope_sig)
-            if p == "T":
-                t_done = True
+                return _execute_phase(ctx, dm, log, p, scope_sig, args)
+            finally:
+                if jobs > 1:
+                    set_log_phase("")
+
+        def on_interrupt() -> None:
+            STOP.set()
+            log.warn("Interrupted - no new phase starts; waiting for the running phases to stop, "
+                     "then salvaging a report from the evidence so far")
+
+        STOP.clear()
+        try:
+            outcomes, interrupted = scheduler.run_phases(
+                ctx.phases, run_one, jobs=jobs,
+                runnable=lambda p: _phase_runnable(ctx, log, p, scope_sig, args),
+                on_interrupt=on_interrupt,
+            )
+        finally:
+            STOP.clear()
+        crashed = [p for p, outcome in outcomes.items() if outcome == scheduler.CRASHED]
+        t_done = outcomes.get("T") in (scheduler.OK, scheduler.FAILED)
 
         if dry_run_active():
             print()

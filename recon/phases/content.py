@@ -10,12 +10,14 @@ the scope or by naming phase C with -p.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from recon import checkpoint
 from recon.config import RunContext
 from recon.deps import DependencyManager
 from recon.resilience import AdaptiveLimiter
@@ -105,7 +107,9 @@ def _owned_bases(ctx: RunContext) -> list[str]:
     return sorted(bases)
 
 
-def _native_probe(bases: list[str], words: list[str], delay: float, log: Logger) -> list[tuple[str, str, int, int]]:
+def _native_probe(bases: list[str], words: list[str], delay: float, log: Logger,
+                  units: "checkpoint.Units | None" = None) -> list[tuple[str, str, int, int]]:
+    words_sig = hashlib.sha256("\n".join(words).encode()).hexdigest()[:12]
     rows: list[tuple[str, str, int, int]] = []
     budget = MAX_REQUESTS
     get = AdaptiveLimiter(base_delay=0.0).wrap(http_get)  # backs off / gives up on hosts that throttle
@@ -122,6 +126,11 @@ def _native_probe(bases: list[str], words: list[str], delay: float, log: Logger)
             break
         batch = words[:budget]
         budget -= len(batch)
+        key = f"native:{base}:{words_sig}:{len(batch)}"
+        if units is not None and units.done(key):
+            rows.extend((b, w, int(st), int(sz)) for b, w, st, sz in units.get(key) or [])
+            continue
+        base_rows: list[tuple[str, str, int, int]] = []
         with ThreadPoolExecutor(max_workers=8) as pool:
             futures = [pool.submit(probe, base, w) for w in batch]
             for fut in futures:
@@ -130,14 +139,25 @@ def _native_probe(bases: list[str], words: list[str], delay: float, log: Logger)
                 except Exception:
                     r = None
                 if r:
-                    rows.append(r)
+                    base_rows.append(r)
+        rows.extend(base_rows)
+        if units is not None:
+            units.mark(key, base_rows)
         if delay:
             time.sleep(delay)
     return rows
 
 
 def _gobuster(ctx: RunContext, dm: DependencyManager, log: Logger, base: str,
-              wordlist: Path, delay: float) -> list[tuple[str, str, int, int]]:
+              wordlist: Path, delay: float,
+              units: "checkpoint.Units | None" = None) -> list[tuple[str, str, int, int]]:
+    try:
+        wl_sig = f"{wordlist}:{wordlist.stat().st_size}"
+    except OSError:
+        wl_sig = str(wordlist)
+    key = f"gobuster:{base}:{wl_sig}"
+    if units is not None and units.done(key):
+        return [(b, w, int(st), int(sz)) for b, w, st, sz in units.get(key) or []]
     out_file = ctx.web_dir / "_gobuster.txt"
     if out_file.is_file():
         out_file.unlink()
@@ -161,15 +181,23 @@ def _gobuster(ctx: RunContext, dm: DependencyManager, log: Logger, base: str,
                 path = m.group(1).lstrip("/")
                 rows.append((base, path, int(m.group(2)), int(m.group(3) or 0)))
         out_file.unlink()
+    if units is not None:
+        units.mark(key, rows)
     return rows
 
 
-def _traversal_probe(bases: list[str], delay: float) -> list[tuple[str, str, str]]:
+def _traversal_probe(bases: list[str], delay: float,
+                     units: "checkpoint.Units | None" = None) -> list[tuple[str, str, str]]:
     """Probe each base for path traversal; keep only responses matching the signature.
     Returns (url, payload_category, snippet)."""
     hits: list[tuple[str, str, str]] = []
     get = AdaptiveLimiter().wrap(http_get)
     for base in bases:
+        key = f"traversal:{base}:{len(TRAVERSAL_PROBES)}"
+        if units is not None and units.done(key):
+            hits.extend((u, t, sn) for u, t, sn in units.get(key) or [])
+            continue
+        base_hits: list[tuple[str, str, str]] = []
         for payload, sig in TRAVERSAL_PROBES:
             url = f"{base}{payload}"
             resp = get(url, timeout=8.0, verify_ssl=False, follow_redirects=False, max_bytes=8192)
@@ -178,10 +206,13 @@ def _traversal_probe(bases: list[str], delay: float) -> list[tuple[str, str, str
                 if m:
                     target = "etc/passwd" if sig == _PASSWD_SIG else "windows/win.ini"
                     snippet = m.group(0).replace("\t", " ").replace("\n", " ")[:80]
-                    hits.append((url, target, snippet))
+                    base_hits.append((url, target, snippet))
                     break  # one confirmed traversal per host is enough
             if delay:
                 time.sleep(delay)
+        hits.extend(base_hits)
+        if units is not None:
+            units.mark(key, base_hits)
     return hits
 
 
@@ -207,13 +238,14 @@ def phaseC(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     wordlist_path = ctx.scope.resolve_file(getattr(ctx.scope, "content_discovery_wordlist", "")) or DEFAULT_WORDLIST
 
     log.info(f"content discovery: {len(words)} paths on {len(bases)} owned host(s)")
+    units = checkpoint.Units(ctx, "C")
     if dm.is_available("gobuster"):
         rows: list[tuple[str, str, int, int]] = []
         for base in bases:
-            rows.extend(_gobuster(ctx, dm, log, base, wordlist_path, delay))
+            rows.extend(_gobuster(ctx, dm, log, base, wordlist_path, delay, units))
     else:
         log.info("gobuster not available - using the native content-discovery probe")
-        rows = _native_probe(bases, words, delay, log)
+        rows = _native_probe(bases, words, delay, log, units)
 
     tsv_rows = []
     for base, path, status, size in rows:
@@ -232,7 +264,7 @@ def phaseC(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     trav_file = ctx.web_dir / "path_traversal.tsv"
     if trav_file.is_file():
         trav_file.unlink()
-    trav = _traversal_probe(bases, delay)
+    trav = _traversal_probe(bases, delay, units)
     trav_rows = [f"{url}\t{target}\t{snippet}" for url, target, snippet in trav]
     trav_file.write_text("".join(f"{r}\n" for r in trav_rows), encoding="utf-8")
     if trav:

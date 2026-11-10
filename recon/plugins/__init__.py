@@ -14,16 +14,23 @@ def _check_httpx(use_docker: bool) -> tuple[bool, str, str]:
     if use_docker and docker_ready:
         return True, "docker", "docker (projectdiscovery/httpx:latest)"
 
+    wrong_binary = False
     if have("httpx"):
         res = run_cmd(["httpx", "-version"], timeout=5)
         text = res.stdout + res.stderr
-        if "projectdiscovery" in text.lower() or "httpx" in text.lower():
-            line = text.splitlines()[0].strip() if text.splitlines() else "installed"
+        low = text.lower()
+        # The Python HTTP client (encode/httpx, `brew install httpx`) shares the
+        # name but has no -l/-version: only ProjectDiscovery's prints these.
+        if res.returncode == 0 and ("projectdiscovery" in low or "current version" in low):
+            line = next((ln.strip() for ln in text.splitlines() if "version" in ln.lower()), "installed")
             return True, "native", line[:80]
+        wrong_binary = True
 
     if docker_ready:
         return True, "docker", "docker (projectdiscovery/httpx:latest)"
 
+    if wrong_binary:
+        return False, "missing", "'httpx' on PATH is the Python client, not ProjectDiscovery's (go install ...httpx/cmd/httpx@latest)"
     return False, "missing", "not installed (projectdiscovery httpx required)"
 
 
@@ -132,7 +139,7 @@ PLUGINS: dict[str, Plugin] = {
         native_bin="httpx",
         version_args=("-version",),
         docker_image="projectdiscovery/httpx:latest",
-        install_macos="brew install httpx",
+        install_macos="go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest  (NOT 'brew install httpx': that is the Python client)",
         install_linux="go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest",
         custom_checker=_check_httpx,
     ),

@@ -25,7 +25,8 @@ the deep-dive reference.
 
 ```bash
 # 1. Install the core tools (macOS / Homebrew)
-brew install nmap subfinder dnsx httpx nuclei amass gobuster gitleaks trufflehog theharvester
+brew install nmap subfinder dnsx nuclei amass gobuster gitleaks trufflehog theharvester
+go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest   # not `brew install httpx`
 
 # 2. Create a scope
 cp scopes/example.toml scopes/acme.toml   # then edit domains, authorisation, owned IPs

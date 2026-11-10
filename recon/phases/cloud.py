@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import csv
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -11,9 +12,10 @@ import shutil
 import socket
 from typing import Any, List, Set, Tuple
 
+from recon import checkpoint
 from recon.config import RunContext
 from recon.deps import DependencyManager
-from recon.runner import Logger, ev, record_virtual_cmd, run_cmd
+from recon.runner import Logger, ev, infra_failure, record_virtual_cmd, run_cmd
 from recon.scope import ip_in, is_public_ip, parse_networks
 
 __all__ = [
@@ -1104,15 +1106,22 @@ def _scan_cloud_ips(
                 str(cloud_dir / "pass1"),
             ],
         )
-        ev(
-            ctx.console_dir,
-            phase_id,
-            pass1_cmd,
-            timeout=1800,
-            title=f"{label} nmap pass 1",
-        )
-
+        units = checkpoint.Units(ctx, phase_id)
+        pass1_key = "pass1:" + hashlib.sha256("\n".join(target_ips).encode()).hexdigest()[:16]
         gnmap_path = cloud_dir / "pass1.gnmap"
+        if units.done(pass1_key) and gnmap_path.is_file():
+            log.info(f"{label} pass 1 reused (finished earlier; --resume)")
+        else:
+            res1 = ev(
+                ctx.console_dir,
+                phase_id,
+                pass1_cmd,
+                timeout=1800,
+                title=f"{label} nmap pass 1",
+            )
+            if not infra_failure(res1) and res1.returncode == 0:
+                units.mark(pass1_key)
+
         if gnmap_path.is_file():
             with gnmap_path.open("r", encoding="utf-8", errors="replace") as f:
                 for line in f:
@@ -1134,6 +1143,10 @@ def _scan_cloud_ips(
         log.info("pass 2 (service detection on open ports)")
 
         for host_ip, ports in open_ports:
+            pass2_key = f"svc:{host_ip}:{ports}"
+            if units.done(pass2_key) and (cloud_dir / f"svc_{host_ip}.nmap").is_file():
+                log.info(f"svc scan of {host_ip} reused (finished earlier; --resume)")
+                continue
             pass2_cmd = dm.build_cmd(
                 "nmap",
                 [
@@ -1152,13 +1165,15 @@ def _scan_cloud_ips(
                     host_ip,
                 ],
             )
-            ev(
+            res2 = ev(
                 ctx.console_dir,
                 phase_id,
                 pass2_cmd,
                 timeout=600,
                 title=f"{label} nmap svc ({host_ip})",
             )
+            if not infra_failure(res2) and res2.returncode == 0:
+                units.mark(pass2_key)
     else:
         if not open_ports_path.exists():
             open_ports_path.write_text("", encoding="utf-8")

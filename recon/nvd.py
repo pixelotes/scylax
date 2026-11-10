@@ -7,6 +7,7 @@ NVD allows ~5 requests / 30 s without a key; set NVD_API_KEY for ~50 / 30 s.
 from __future__ import annotations
 
 import os
+import threading
 import time
 import urllib.parse
 from typing import Any, Dict, List, Set
@@ -17,6 +18,7 @@ NVD_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
 
 _last_call = 0.0
+_rate_lock = threading.Lock()  # phases may run concurrently (--jobs): keep the NVD pace global
 
 
 def cpe_to_23(cpe: str) -> str | None:
@@ -54,18 +56,20 @@ def nvd_cves_for_cpe(cpe23: str, api_key: str | None = None) -> tuple[int, List[
     global _last_call
     api_key = api_key if api_key is not None else os.environ.get("NVD_API_KEY", "").strip()
     gap = 0.7 if api_key else 6.5
-    wait = _last_call + gap - time.monotonic()
-    if wait > 0:
-        time.sleep(wait)
-    _last_call = time.monotonic()
+    with _rate_lock:
+        wait = _last_call + gap - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        _last_call = time.monotonic()
 
     url = f"{NVD_URL}?cpeName={urllib.parse.quote(cpe23, safe=':*')}"
     headers = {"apiKey": api_key} if api_key else None
     st, data = http_get_json(url, headers=headers, timeout=60)
     if st in (0, 403, 429, 503):
         # NVD throttles with 403/429/503 and drops slow connections: one backoff retry
-        time.sleep(gap * 2)
-        _last_call = time.monotonic()
+        with _rate_lock:
+            time.sleep(gap * 2)
+            _last_call = time.monotonic()
         st, data = http_get_json(url, headers=headers, timeout=60)
     items: List[Dict[str, Any]] = []
     if st != 200 or not isinstance(data, dict):

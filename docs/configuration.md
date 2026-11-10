@@ -125,6 +125,7 @@ Credentials come from the environment: `M365_TENANT_ID` / `M365_CLIENT_ID` /
 | `httpx_rate` | int | `50` | httpx requests/sec. |
 | `use_amass` | bool | `true` | Use amass in phases 1 & 9. |
 | `amass_timeout_min` | int | `10` | Amass enumeration timeout. |
+| `jobs` | int | `1` | Independent phases run at once (`--jobs` overrides). Active phases never overlap. |
 
 ### `[thresholds]`
 
