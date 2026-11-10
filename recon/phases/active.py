@@ -10,6 +10,7 @@ import time
 import urllib.parse
 from pathlib import Path
 
+from recon import checkpoint
 from recon.config import RunContext
 from recon.deps import DependencyManager
 from recon.runner import Logger, ev, http_get, infra_failure, record_tool_failure, record_virtual_cmd, run_cmd
@@ -38,6 +39,11 @@ WELL_KNOWN_PATHS: list[tuple[str, str, str]] = [
     ("/redoc", "api-docs", r"<redoc|Redoc\.init"),
     ("/swagger-ui/index.html", "api-docs", r"swagger-ui|SwaggerUIBundle"),
 ]
+
+
+def _unit_ok(res) -> bool:
+    """A command finished cleanly: no timeout/infra failure and exit 0 (the condition for marking a unit done)."""
+    return not infra_failure(res) and res.returncode == 0
 
 
 def _native_http_probe(hosts: list[str], workers: int = 16) -> list[tuple[str, int, str, str, str, str]]:
@@ -469,16 +475,19 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     tls_enum = bool(getattr(ctx.scope, "tls_enum_ciphers", True))
     log.info(f"Phase 4: Scanning {total} targets ({scan_desc}, rate: {ctx.scope.nmap_max_rate} pkts/s, max-retries: 1, host-timeout: 5m)")
 
+    units = checkpoint.Units(ctx, "4")
     for idx, ip in enumerate(target_ips, 1):
         full_prefix = ctx.scan_dir / f"full_{ip}"
         nmap_file = ctx.scan_dir / f"full_{ip}.nmap"
 
-        # Check if already scanned in an earlier or interrupted run
-        if nmap_file.is_file() and nmap_file.stat().st_size > 0:
-            log.info(f"[{idx}/{total}] Reusing existing scan for {ip}")
+        # Reuse only a scan that finished cleanly in an earlier, interrupted run (--resume);
+        # a bare output file is not proof: a killed nmap leaves a partial one.
+        full_key = f"nmap-full:{ip}:{' '.join(port_scan_args)}"
+        if units.done(full_key) and nmap_file.is_file():
+            log.info(f"[{idx}/{total}] Reusing finished scan for {ip} (--resume)")
         else:
             log.info(f"[{idx}/{total}] Scanning {scan_desc} on {ip}...")
-            ev(
+            res_full = ev(
                 ctx.console_dir,
                 "4",
                 dm.build_cmd(
@@ -502,6 +511,8 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 timeout=360,
                 title=f"nmap {scan_title_suffix} TCP ({ip})",
             )
+            if _unit_ok(res_full):
+                units.mark(full_key)
 
         open_ports: list[str] = []
         if nmap_file.is_file():
@@ -518,11 +529,12 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         svc_prefix = ctx.scan_dir / f"svc_{ip}"
         svc_file = ctx.scan_dir / f"svc_{ip}.nmap"
 
-        if svc_file.is_file() and svc_file.stat().st_size > 0:
-            log.ok(f"[{idx}/{total}] {ip}: {ports_csv} (reused service scan)")
+        svc_key = f"nmap-svc:{ip}:{ports_csv}:{int(tls_enum)}"
+        if units.done(svc_key) and svc_file.is_file():
+            log.ok(f"[{idx}/{total}] {ip}: {ports_csv} (reused service scan; --resume)")
         else:
             log.info(f"[{idx}/{total}] Service fingerprinting on {ip}:{ports_csv}...")
-            ev(
+            res_svc = ev(
                 ctx.console_dir,
                 "4",
                 dm.build_cmd(
@@ -548,6 +560,8 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 timeout=540 if tls_enum else 360,
                 title=f"nmap service scan ({ip})",
             )
+            if _unit_ok(res_svc):
+                units.mark(svc_key)
             log.ok(f"[{idx}/{total}] {ip}: {ports_csv}")
 
     _collect_tls(ctx, target_ips, log)
@@ -558,8 +572,12 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     if nmap_in_docker or (hasattr(os, "geteuid") and os.geteuid() == 0):
         for idx, ip in enumerate(target_ips, 1):
             udp_prefix = ctx.scan_dir / f"udp_{ip}"
+            udp_key = f"nmap-udp:{ip}"
+            if units.done(udp_key) and (ctx.scan_dir / f"udp_{ip}.nmap").is_file():
+                log.info(f"[{idx}/{total}] Reusing finished UDP scan for {ip} (--resume)")
+                continue
             log.info(f"[{idx}/{total}] Scanning UDP VPN ports on {ip}...")
-            ev(
+            res_udp = ev(
                 ctx.console_dir,
                 "4",
                 dm.build_cmd(
@@ -581,6 +599,8 @@ def phase4(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 timeout=240,
                 title=f"nmap UDP ({ip})",
             )
+            if _unit_ok(res_udp):
+                units.mark(udp_key)
     else:
         log.warn("UDP scan of VPN ports not performed (requires root; re-run with sudo or --docker for IKE/IPsec 500/4500)")
 
@@ -597,14 +617,16 @@ def phase4b(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         return
 
     total_edges = len(ctx.scope.edge_ips)
+    units = checkpoint.Units(ctx, "4b")
     for idx, ip in enumerate(ctx.scope.edge_ips, 1):
         edge_prefix = ctx.scan_dir / f"edge_{ip}"
         edge_file = ctx.scan_dir / f"edge_{ip}.nmap"
-        if edge_file.is_file() and edge_file.stat().st_size > 0:
-            log.info(f"[{idx}/{total_edges}] Reusing existing edge scan for {ip}")
+        edge_key = f"nmap-edge:{ip}:{ctx.scope.edge_ports}"
+        if units.done(edge_key) and edge_file.is_file():
+            log.info(f"[{idx}/{total_edges}] Reusing finished edge scan for {ip} (--resume)")
             continue
         log.info(f"[{idx}/{total_edges}] Fingerprinting edge device {ip} (ports: {ctx.scope.edge_ports})...")
-        ev(
+        res_edge = ev(
             ctx.console_dir,
             "4b",
             dm.build_cmd(
@@ -630,6 +652,8 @@ def phase4b(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
             timeout=360,
             title=f"nmap edge fingerprint ({ip})",
         )
+        if _unit_ok(res_edge):
+            units.mark(edge_key)
     log.ok(f"Phase 4b complete for {len(ctx.scope.edge_ips)} edge devices")
 
 
@@ -774,12 +798,10 @@ def phase8(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     for stale in list(ctx.web_dir.glob("nuclei_*.jsonl")) + list(ctx.web_dir.glob("nuclei_batch_*.txt")):
         if not ctx.resume:
             stale.unlink()
-    for marker in ctx.web_dir.glob(".nuclei_*.done"):
-        if not ctx.resume:
-            marker.unlink()
     log.info(f"nuclei: {len(filtered_targets)} target(s) in {len(batches)} batch(es) of up to {size}, "
              f"{batch_timeout // 60} min limit per batch")
 
+    units = checkpoint.Units(ctx, "8")
     failed_targets: list[str] = []
     failures: list[str] = []
     out_files: list[Path] = []
@@ -787,9 +809,9 @@ def phase8(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         sig = hashlib.sha256("\n".join(batch).encode()).hexdigest()[:8]
         batch_file = ctx.web_dir / f"nuclei_batch_{sig}.txt"
         batch_out = ctx.web_dir / f"nuclei_{sig}.jsonl"
-        marker = ctx.web_dir / f".nuclei_{sig}.done"
+        unit_key = f"nuclei-batch:{sig}"
         out_files.append(batch_out)
-        if marker.is_file():
+        if units.done(unit_key):
             log.info(f"nuclei batch {n}/{len(batches)}: reused (--resume)")
             continue
         batch_file.write_text("\n".join(batch) + "\n", encoding="utf-8")
@@ -824,7 +846,7 @@ def phase8(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
             log.warn(f"nuclei batch {n}/{len(batches)} failed ({reason}); its partial findings are kept and "
                      f"its {len(batch)} target(s) get the native sensitive-path probe")
         else:
-            marker.write_text("done\n", encoding="utf-8")
+            units.mark(unit_key)
 
     # One file for the triage, merged from every batch (including partial output of failed ones)
     merged = [line for f in out_files if f.is_file()

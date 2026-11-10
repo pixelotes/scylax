@@ -380,7 +380,7 @@ Key settings in `scopes/example.toml`:
 | `--authorisation-ref REF` | Written authorisation ticket/ref for active phases (or `AUTHORISATION_REF`) |
 | `-D`, `--docker` | Run supported tools via Docker containers instead of native binaries |
 | `--dry-run` | List the commands and HTTP requests each phase would issue, run nothing and write no evidence. Commands that depend on earlier phases' results, and requests that are only made after a first response qualifies, cannot be listed |
-| `--resume` | Skip phases already completed (with no tool failure) in this run folder; editing the scope file invalidates them. `gaps.txt` is kept, so gaps accumulate |
+| `--resume` | Skip phases already completed (with no tool failure) in this run folder, and inside a phase that was interrupted or had failures skip the units already finished (per IP nmap pass, nuclei batch, edge device, cloud IP, breach-lookup account, Shodan IP, content-discovery host); console evidence of the unfinished phase is kept. Editing the scope file invalidates both. `gaps.txt` is kept, so gaps accumulate. Without `--resume` everything runs fresh |
 | `--doctor` | One-shot health check (Python, tools, scope, API keys, egress IP, next command) and exit; `0` if nothing blocks a run, `1` otherwise |
 | `--check-deps` | Print dependency status table and exit |
 | `--check-config` | Validate the scope file (unknown keys, missing files, empty sections) and exit |

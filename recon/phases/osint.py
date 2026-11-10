@@ -26,6 +26,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Set, Tuple
 
+from recon import checkpoint
 from recon.config import RunContext
 from recon.deps import DependencyManager
 from recon.runner import (
@@ -791,7 +792,17 @@ def phase7(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
     shodan_records: list[dict[str, Any]] = []
     if ctx.shodan_api_key:
+        units = checkpoint.Units(ctx, "7")
+        shodan_file.write_text("", encoding="utf-8")  # rebuilt from every IP (reused + fresh)
         for ip in target_ips:
+            unit_key = f"shodan:{ip}"
+            if units.done(unit_key):  # --resume: reuse the saved answer instead of re-querying
+                data = units.get(unit_key)
+                if isinstance(data, dict) and data:
+                    shodan_records.append(data)
+                    with shodan_file.open("a", encoding="utf-8") as f:
+                        f.write(json.dumps(data) + "\n")
+                continue
             url = f"https://api.shodan.io/shodan/host/{ip}?key={ctx.shodan_api_key}"
             status, data = http_get_json(url, timeout=30)
             if status == 200 and isinstance(data, dict):
@@ -799,6 +810,9 @@ def phase7(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 shodan_records.append(data)
                 with shodan_file.open("a", encoding="utf-8") as f:
                     f.write(json.dumps(data) + "\n")
+                units.mark(unit_key, data)
+            elif status == 404:  # Shodan has nothing on this IP: a definitive answer
+                units.mark(unit_key, {})
             time.sleep(1)
 
         masked_lines: list[str] = []
@@ -1350,7 +1364,12 @@ def _xposedornot_account_breaches(
     breach catalogue when the same breach exists there.
     """
     results: list[dict[str, Any]] = []
+    units = checkpoint.Units(ctx, "9")
     for em in emails:
+        unit_key = f"xon-account:{em}"
+        if units.done(unit_key):  # --resume: reuse the saved answer instead of re-querying (~1 req/s)
+            results.extend(units.get(unit_key) or [])
+            continue
         time.sleep(1.1)
         url = f"https://api.xposedornot.com/v1/check-email/{urllib.parse.quote(em)}"
         status, data = _breach_lookup(log, "XposedOrNot", em, url, {"User-Agent": "Scylax/1.0"})
@@ -1361,6 +1380,7 @@ def _xposedornot_account_breaches(
                 f"HTTP 404: No breach records for {em}",
                 title=f"XposedOrNot account breaches ({em})",
             )
+            units.mark(unit_key, [])
             continue
         if status != 200 or not isinstance(data, dict):
             log.warn(f"XposedOrNot lookup for {em} returned HTTP {status} after {BREACH_RETRIES} retries")
@@ -1381,10 +1401,11 @@ def _xposedornot_account_breaches(
                 names.extend(str(x) for x in item if x)
             elif item:
                 names.append(str(item))
+        em_rows: list[dict[str, Any]] = []
         for name in dict.fromkeys(names):
             d = _hibp_breach_details(name) or {}
             classes = d.get("DataClasses") or []
-            results.append(
+            em_rows.append(
                 {
                     "email": em,
                     "name": name,
@@ -1396,6 +1417,8 @@ def _xposedornot_account_breaches(
                     "is_sensitive": str(bool(d.get("IsSensitive", False))),
                 }
             )
+        results.extend(em_rows)
+        units.mark(unit_key, em_rows)
     return results
 
 
@@ -1492,7 +1515,12 @@ def run_hibp_breaches(
 
     if api_key:
         log.info(f"Checking {min(len(target_emails), 50)} corporate account(s) against HaveIBeenPwned")
+        units = checkpoint.Units(ctx, "9")
         for em in target_emails[:50]:
+            unit_key = f"hibp-account:{em}"
+            if units.done(unit_key):  # --resume: reuse the saved answer instead of re-querying
+                account_breaches.extend(units.get(unit_key) or [])
+                continue
             time.sleep(1.6)  # HIBP enforces 1 request per 1.5s rate limit
             url = f"https://haveibeenpwned.com/api/v3/breachedaccount/{urllib.parse.quote(em)}?truncateResponse=false"
             status, data = _breach_lookup(log, "HIBP", em, url, headers)
@@ -1508,6 +1536,7 @@ def run_hibp_breaches(
                 )
                 raw_acc_path = ctx.osint_dir / f"hibp_account_{re.sub(r'[^a-zA-Z0-9_.-]', '_', em)}.json"
                 raw_acc_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                em_rows: list[dict[str, Any]] = []
                 for b in data:
                     if isinstance(b, dict):
                         data_classes = b.get("DataClasses") or []
@@ -1516,7 +1545,7 @@ def run_hibp_breaches(
                             if isinstance(data_classes, list)
                             else str(data_classes)
                         )
-                        account_breaches.append(
+                        em_rows.append(
                             {
                                 "email": em,
                                 "name": str(b.get("Name") or ""),
@@ -1528,6 +1557,8 @@ def run_hibp_breaches(
                                 "is_sensitive": str(bool(b.get("IsSensitive", False))),
                             }
                         )
+                account_breaches.extend(em_rows)
+                units.mark(unit_key, em_rows)
             elif status == 404:
                 record_virtual_cmd(
                     ctx.console_dir,
@@ -1536,6 +1567,7 @@ def run_hibp_breaches(
                     f"HTTP 404: No breach records for {em}",
                     title=f"HIBP account breaches ({em})",
                 )
+                units.mark(unit_key, [])
             else:
                 log.warn(f"HIBP account lookup for {em} returned HTTP {status} after {BREACH_RETRIES} retries")
                 record_virtual_cmd(

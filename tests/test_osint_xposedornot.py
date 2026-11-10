@@ -14,7 +14,7 @@ from recon.phases import osint  # noqa: E402
 class TestXposedOrNotFallback(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
-        self.ctx = SimpleNamespace(console_dir=Path(self.tmp.name))
+        self.ctx = SimpleNamespace(console_dir=Path(self.tmp.name), run_dir=Path(self.tmp.name), scope=None, resume=False)
         self.log = mock.Mock()
         osint._HIBP_BREACH_CACHE.clear()
 
