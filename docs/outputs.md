@@ -55,6 +55,28 @@ that, `diff.md` classifies each finding relative to the previous run:
 | **Suppressed (accepted)** | Newly covered by a suppression this run. Never counted as resolved or new. Shown only when it has entries. |
 | **Reactivated (suppression expired)** | Active again because its suppression expired (or was removed). Shown only when it has entries; high/critical ones are alerted like new findings. |
 
+### Summary block and trends
+
+`diff.md` opens with a **Summary**: net change in active findings (previous -> current),
+a per-severity table (new / reappeared / reactivated / resolved / persisting / net), the
+**MTTR**, open findings by age, and the five oldest open high/critical findings. The same
+numbers are written to `trends.json` (and into `report_data.json` as `trends`), and
+`report.html` / `report.md` show them as a "What changed since <date>" card at the top of
+the Overview (hidden when there is no previous run).
+
+- **Age** = days from `first_seen` to the run date, for every active finding, bucketed
+  `<30`, `30-90`, `90-180`, `>180` per severity.
+- **MTTR** = median days from `first_seen` to the resolution date, per severity, over
+  findings resolved in the last 90 days. A finding counts as resolved only on a run that
+  actually checked it (its phase ran and its tool did not fail); "not re-checked" never
+  counts. The resolution date is therefore an **upper bound** on the real fix date, and a
+  finding that later reappears drops out of the MTTR.
+- `findings_history.json` gains a reserved top-level `__runs__` list (date, phases run,
+  failed tools per run) used to place resolution dates. Older files without it keep
+  working: runs are then inferred from the dates findings were seen on (phases unknown,
+  so assumed checked), which can overestimate time-to-resolve across runs that found
+  nothing.
+
 This "not re-checked ≠ resolved" rule is what makes the diff trustworthy across
 runs where a tool was temporarily unavailable.
 
@@ -134,6 +156,7 @@ ignore unknown fields.
   "meta":     { engagement, scope, date, authorised_by, authorisation_ref, phases, egress_ip, use_docker },
   "kpis":     { critical, high, …, subdomains, live_web_hosts, cves_total, … },
   "summary":  { total_findings, total_assets, total_relations, severity_counts },
+  "trends":   { run_date, previous_run, counts, totals, net, age_buckets, mttr, oldest_open },  // {} without a previous run
   "diff":     { "New": [...], "Reappeared": [...], "Resolved": [...], "Not re-checked": [...], "Persisting": [...] },
   "assets":   [ { id, type, type_label, key, label, pseudo, cloud, ports, cves, finding_ids, worst_severity, … } ],
   "findings": [ { id, key, severity, title, evidence, target, asset_id, asset_ids, asset_keys } ],

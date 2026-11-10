@@ -13,7 +13,7 @@ from recon.config import RunContext
 from recon.deps import DependencyManager
 from recon.report import generate_reports, nsg_ports
 from recon.webprobe import is_hash_label, is_ingress_default_404
-from recon import export, notify, suppressions
+from recon import export, notify, suppressions, trends
 from recon.runner import (
     Logger,
     http_get,
@@ -1118,7 +1118,22 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
             seen = h.get("seen", [])
             return f" _(open since {h.get('first_seen', '?')}, {len(seen)} runs)_" if seen else ""
 
+        t = trends.compute_trends(
+            run_date=ctx.run_date, prev_date=ctx.prev_run_dir.name, history=history,
+            buckets={"new": new_keys, "reappeared": reappeared_keys, "resolved": resolved_keys,
+                     "not_rechecked": unchecked_keys, "persisting": persisting_keys,
+                     "reactivated": reactivated_keys},
+            curr_sev={k: v[0] for k, v in curr_map.items()},
+            prev_sev={k: v[0] for k, v in prev_map.items()},
+            phase_of=finding_phase, tools_of=finding_tools,
+            suppressed_keys=list(supp_map))
+        try:
+            (ctx.run_dir / "trends.json").write_text(json.dumps(t, indent=1), encoding="utf-8")
+        except OSError:
+            pass
+
         diff_lines: list[str] = [f"# Changes {ctx.prev_run_dir.name} -> {ctx.run_date}"]
+        diff_lines += trends.render_summary_md(t)
         for section_name, keys, src, with_age in (
             ("New", new_keys, curr_map, False),
             ("Reappeared", reappeared_keys, curr_map, True),
@@ -1286,6 +1301,10 @@ def _update_history(ctx: RunContext, curr_map: dict[str, tuple[str, str, str, st
             h["seen"].sort()
         h["first_seen"] = min(h["first_seen"], ctx.run_date)
         h["severity"], h["title"] = sev, title
+    # Reserved key: which phases ran / tools failed per run (dates a finding was
+    # absent are only meaningful if its phase ran); see recon/trends.py
+    trends.record_run(history, ctx.run_date, _run_phases(ctx.run_dir),
+                      {tool for _, tool, _ in load_tool_failures(ctx.run_dir)})
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(history, indent=1, sort_keys=True), encoding="utf-8")

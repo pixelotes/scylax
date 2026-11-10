@@ -8,7 +8,7 @@ Propuesta de mejoras priorizadas. Principio rector: **no superar el techo de int
 - [x] **Reanudación real (`--resume`).** *(Hecho: checkpoints por unidad — IP/pasada nmap, lote nuclei, IP cloud, cuenta de brechas, IP Shodan, host de fase C. Pendiente: lookups CPE/CVE de fase 7 y fases 1 y 6.)* Ampliar `checkpoint.py` para reanudar fase a fase tras un fallo (`nmap`, `nuclei`, timeouts) sin repetir lo ya hecho.
 - [x] **Formatos de salida estándar.** *(Hecho: `findings.sarif` (SARIF 2.1.0) y `findings.csv` en cada run y con `--export`, generados desde `report_data.json` en `recon/export_formats.py`.)* Añadir **SARIF** y **CSV** además de `report_data.json` / `findings.jsonl`, para integrar con Jira, DefectDojo, etc.
 - [x] **Supresiones con caducidad.** *(Hecho: `scopes/<scope>.suppressions.toml` o `suppressions_file`; lo suprimido pasa a `suppressed.md` y a la tabla "Suppressed" del informe, con motivo, responsable y caducidad; al caducar vuelve como activo y `diff.md` lo marca "Reactivated".)* Fichero `suppressions.toml` (hallazgo, motivo, fecha de caducidad) para que lo aceptado no reaparezca en cada `diff.md`.
-- [ ] **Diff entre runs más útil.** Tendencias (MTTR de resueltos, edad de persistentes) y resumen "qué cambió" en la cabecera de `report.html`, usando `findings_history.json`.
+- [x] **Diff entre runs más útil.** Tendencias (MTTR de resueltos, edad de persistentes) y resumen "qué cambió" en la cabecera de `report.html`, usando `findings_history.json`.
 
 ## Prioridad media
 

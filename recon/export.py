@@ -226,6 +226,8 @@ def build_report_data(data: Any) -> Dict[str, Any]:
             },
         },
         "diff": {k: list(v) for k, v in (getattr(data, "diff_summary", {}) or {}).items()},
+        # Trend metrics vs the previous run (see recon/trends.py); {} without one
+        "trends": dict(getattr(data, "trends", {}) or {}),
         "assets": assets_out,
         "findings": findings_out,
         "relations": relations,

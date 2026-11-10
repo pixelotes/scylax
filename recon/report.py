@@ -14,6 +14,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
+from recon import trends as trends_mod
 from recon.suppressions import load_suppressed
 from recon.assets import (
     SEV_RANK,
@@ -182,6 +183,8 @@ class RunData:
         # Auditor-suppressed candidates (still observed; listed with reason/owner/expiry)
         self.suppressed: list[dict[str, str]] = load_suppressed(self.run_dir)
         self.diff_content, self.diff_summary = self._load_diff()
+        # Trend metrics written by triage next to diff.md ({} without a previous run)
+        self.trends: dict[str, Any] = self._load_trends()
         self.gaps: list[str] = self._load_gaps()
         self.tool_versions: list[str] = self._load_tool_versions()
         self.subdomain_counts: list[tuple[str, int]] = self._load_subdomain_counts()
@@ -303,6 +306,13 @@ class RunData:
         findings.sort(key=lambda f: (order_map.get(f["severity"], 99), f["title"].lower()))
         return findings
 
+    def _load_trends(self) -> dict[str, Any]:
+        try:
+            t = json.loads(_safe_read_text(self.run_dir / "trends.json") or "{}")
+        except ValueError:
+            return {}
+        return t if isinstance(t, dict) and t.get("counts") and t.get("totals") else {}
+
     def _load_diff(self) -> tuple[str, dict[str, list[str]]]:
         diff_path = self.run_dir / "diff.md"
         content = _safe_read_text(diff_path)
@@ -313,7 +323,9 @@ class RunData:
             cur_section = ""
             for line in content.splitlines():
                 s = line.strip()
-                if s.startswith("## New"):
+                if s.startswith("## Summary"):
+                    cur_section = ""
+                elif s.startswith("## New"):
                     cur_section = "New"
                 elif s.startswith("## Resolved"):
                     cur_section = "Resolved"
@@ -890,6 +902,75 @@ def _suppressed_html(data: RunData) -> str:
     </div>"""
 
 
+def _changes_markdown(data: RunData) -> list[str]:
+    """'What changed since <date>' block ([] without a previous run)."""
+    t = data.trends
+    if not t:
+        return []
+    tot = t["totals"]
+    lines = [f"## What Changed Since {t['previous_run']}", "",
+             f"Net change: **{trends_mod.signed(tot['net'])}** active findings "
+             f"({tot['previous']} -> {tot['current']}); {tot['new']} new, {tot['resolved']} resolved, "
+             f"{tot['reappeared']} reappeared, {tot['reactivated']} reactivated.", "",
+             "| Severity | Now | Net | New | Resolved |", "|---|---|---|---|---|"]
+    for s in t["severities"]:
+        lines.append(f"| `{s.upper()}` | {t['current'][s]} | {trends_mod.signed(t['net'][s])} | "
+                     f"{t['counts']['new'][s]} | {t['counts']['resolved'][s]} |")
+    lines += ["", f"MTTR (last {t['mttr']['window_days']} days): {trends_mod.mttr_text(t)}", ""]
+    if t["oldest_open"]:
+        lines += ["Oldest open critical/high:", ""]
+        lines += [f"- **{o['severity'].upper()}** {_escape_md_cell(o['title'])} - {o['age_days']} days" for o in t["oldest_open"]]
+        lines.append("")
+    return lines
+
+
+def _changes_html(data: RunData) -> str:
+    """'What changed since <date>' card for the top of the Overview tab ('' without a previous run)."""
+    t = data.trends
+    if not t:
+        return ""
+    tot = t["totals"]
+
+    def net_cell(n: int) -> str:
+        arrow = "&uarr;" if n > 0 else ("&darr;" if n < 0 else "=")
+        color = "var(--critical)" if n > 0 else ("var(--accent)" if n < 0 else "var(--text-secondary)")
+        return f"<span style=\"color: {color}; font-weight: 600;\">{arrow} {abs(n)}</span>"
+
+    rows = "".join(
+        f"<tr><td><span class=\"badge badge-{s}\">{s.upper()}</span></td><td class=\"mono\">{t['current'][s]}</td>"
+        f"<td>{net_cell(t['net'][s])}</td><td class=\"mono\">{t['counts']['new'][s]}</td>"
+        f"<td class=\"mono\">{t['counts']['resolved'][s]}</td></tr>"
+        for s in t["severities"])
+    oldest = "".join(
+        f"<tr><td><span class=\"badge badge-{html.escape(o['severity'])}\">{html.escape(o['severity'].upper())}</span></td>"
+        f"<td>{html.escape(o['title'])}</td><td class=\"mono\">{o['age_days']} days</td></tr>"
+        for o in t["oldest_open"]) or "<tr><td colspan='3' class='empty-state'>No open high/critical findings</td></tr>"
+    return f"""<div class="card" id="what-changed">
+      <div class="card-header">
+        <span class="card-title">What changed since {html.escape(t['previous_run'])}</span>
+        <span class="card-subtitle">{net_cell(tot['net'])} active findings ({tot['previous']} &rarr; {tot['current']}) &bull;
+          {tot['new']} new &bull; {tot['resolved']} resolved &bull; {tot['reappeared']} reappeared &bull; {tot['reactivated']} reactivated</span>
+      </div>
+      <div class="card-body">
+        <div class="grid-2">
+          <div class="table-responsive">
+            <table>
+              <thead><tr><th>Severity</th><th>Now</th><th>Net</th><th>New</th><th>Resolved</th></tr></thead>
+              <tbody>{rows}</tbody>
+            </table>
+          </div>
+          <div class="table-responsive">
+            <p style="color: var(--text-secondary); margin-bottom: 0.5rem;">MTTR (resolved in last {t['mttr']['window_days']} days): <strong>{html.escape(trends_mod.mttr_text(t))}</strong></p>
+            <table>
+              <thead><tr><th>Oldest open</th><th>Finding</th><th>Age</th></tr></thead>
+              <tbody>{oldest}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>"""
+
+
 def generate_markdown(data: RunData) -> str:
     """Generate detailed GitHub Flavored Markdown assessment report."""
     m = data.meta
@@ -915,6 +996,8 @@ def generate_markdown(data: RunData) -> str:
     lines.append(f"| **Egress IP** | `{_escape_md_cell(m.get('egress_ip', 'unknown'))}` |")
     lines.append(f"| **Phases Run** | `{_escape_md_cell(m.get('phases', 'All'))}` (Skip Active: {m.get('skip_active')}, Docker: {m.get('use_docker')}) |")
     lines.append("")
+
+    lines.extend(_changes_markdown(data))
 
     # Section 1: Executive Summary & KPIs
     lines.append("## 1. Executive Summary & KPIs")
@@ -1932,6 +2015,8 @@ def generate_html(data: RunData) -> str:
   <!-- ================================================================= -->
   <section id="tab-overview" class="tab-content active">
     
+    {_changes_html(data)}
+
     <div class="kpi-section-title">Severity KPI Cards</div>
     <div class="kpi-grid">
       <div class="kpi-card kpi-critical clickable" data-jump-sev="CRITICAL" title="Show critical findings">
