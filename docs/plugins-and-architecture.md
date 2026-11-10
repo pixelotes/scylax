@@ -115,6 +115,39 @@ PHASE_DEPENDENCIES = {
 - A tool that **fails at runtime** is recorded in `tool_failures.tsv` so the diff
   marks its findings "not re-checked" rather than "resolved".
 
+## Parallel phases
+
+`--jobs N` (default `1`) lets `recon/scheduler.py` run independent phases at the
+same time. A phase starts only once the phases it reads from have finished —
+counting only phases that actually run in this invocation (unselected, skipped or
+already `--resume`-completed phases impose no wait); a crashed phase still
+releases its dependents, exactly as in a sequential run:
+
+| Phase | Waits for |
+|---|---|
+| 2 | 1 |
+| 3, 4 | 1, 2 |
+| 5, C | 3 |
+| 7 | 2, 4, 4b, A, G |
+| 8 | 2, 3 |
+| 9 | 2, 6 |
+| T | every other phase (always last, alone) |
+| 1, 4b, 6, A, G, W, E, S | — |
+
+**Intrusiveness ceiling.** Parallelism never raises the traffic intensity against
+the targets. Every phase that sends traffic to the client's targets — 3, 4, 4b,
+5, 8, C, A, G, W (nmap on cloud public IPs) and E (anonymous tenant requests) —
+belongs to one *active traffic lane*, and at most one lane phase runs at a time,
+so the targets see the same per-tool rates as a sequential run. Only passive,
+third-party API or offline phases (1, 2, 6, 7, 9, S) run alongside it.
+
+`--jobs 1` is the historical sequential loop (same order, same output). With more
+jobs, log lines carry a `[phase X]` prefix; `--dry-run` always runs sequentially.
+Ctrl-C stops new phases from starting, makes the running ones stop at their next
+command or request, then salvages the report (exit `130`). Shared run files
+(`gaps.txt`, `console/commands.jsonl`, `tool_failures.tsv`) and the NVD rate
+limiter are lock-protected.
+
 ## ScopeGuard — ownership enforcement
 
 `recon/scope.py` builds an allowlist from `owned_ranges`, `owned_ips_file`,

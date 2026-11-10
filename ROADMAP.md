@@ -4,7 +4,7 @@ Propuesta de mejoras priorizadas. Principio rector: **no superar el techo de int
 
 ## Prioridad alta
 
-- [ ] **Paralelismo entre fases y hosts.** Hoy solo `phases/active.py` y `phases/content.py` usan `ThreadPoolExecutor`; OSINT, DNS, nmap por IP y cloud son secuenciales. Añadir pools por fase respetando los límites de `resilience.py`.
+- [x] **Paralelismo entre fases y hosts.** *(Entre fases: `--jobs N` con `recon/scheduler.py`; las fases activas comparten un único carril, así que la intensidad contra los objetivos no sube.)* Hoy solo `phases/active.py` y `phases/content.py` usan `ThreadPoolExecutor`; OSINT, DNS, nmap por IP y cloud son secuenciales. Añadir pools por fase respetando los límites de `resilience.py`.
 - [ ] **Reanudación real (`--resume`).** Ampliar `checkpoint.py` para reanudar fase a fase tras un fallo (`nmap`, `nuclei`, timeouts) sin repetir lo ya hecho.
 - [ ] **Formatos de salida estándar.** Añadir **SARIF** y **CSV** además de `report_data.json` / `findings.jsonl`, para integrar con Jira, DefectDojo, etc.
 - [ ] **Supresiones con caducidad.** Fichero `suppressions.toml` (hallazgo, motivo, fecha de caducidad) para que lo aceptado no reaparezca en cada `diff.md`.

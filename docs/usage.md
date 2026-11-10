@@ -44,6 +44,7 @@ and `--check-config` are the narrower, single-purpose versions.
 | `-D`, `--docker` | `USE_DOCKER=1` | Run supported tools from containers. |
 | `--shodan-key` | `SHODAN_API_KEY` | Shodan API key (phase 7). |
 | `--hibp-key` | `HIBP_API_KEY` | HaveIBeenPwned key (phase 9). |
+| `--jobs N` | `SCYLAX_JOBS` | Run up to N independent phases at once (default `1`, sequential; scope key `jobs` also works). Phases that send traffic to the targets never overlap, so traffic intensity does not increase. Ignored with `--dry-run`. See [Parallel phases](plugins-and-architecture.md#parallel-phases). |
 | `--doctor` | — | One-shot health check (Python, tools, scope, API keys, egress, next step) and exit; `0` if nothing blocks a run, else `1`. |
 | `--check-deps` | — | Show tool availability (native/Docker) and exit. |
 | `--check-config` | — | Validate the scope file and exit. |

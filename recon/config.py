@@ -216,6 +216,7 @@ class ScopeConfig:
     amass_timeout_min: int = 10
     quick_scan: bool = False
     top_ports: int | None = None
+    jobs: int | None = None  # concurrent phases (--jobs); active phases never overlap
     min_apache: str = "2.4.65"
     min_nginx: str = "1.26.0"
     min_routeros: str = "7.15"
@@ -494,6 +495,7 @@ class ScopeConfig:
             tls_enum_ciphers=str(flat.get("tls_enum_ciphers", True)).strip().lower() not in ("0", "false", "no"),
             quick_scan=bool(flat.get("quick_scan", False) or flat.get("quick", False)),
             top_ports=int(flat["top_ports"]) if flat.get("top_ports") else None,
+            jobs=max(1, int(flat["jobs"])) if flat.get("jobs") else None,
             min_apache=str(flat.get("min_apache", "2.4.65")),
             min_nginx=str(flat.get("min_nginx", "1.26.0")),
             min_routeros=str(flat.get("min_routeros", "7.15")),
@@ -670,7 +672,7 @@ _SCOPE_SCHEMA: dict[str, tuple[str, ...]] = {
         "skip_portscan_orgs", "apex_trusted_orgs", "use_amass",
         "edge_ports", "edge_max_rate", "nmap_max_rate", "httpx_rate", "nuclei_rate",
         "amass_timeout_min", "tls_enum_ciphers", "nuclei_batch_size", "nuclei_batch_timeout_min",
-        "top_ports", "quick", "quick_scan",
+        "top_ports", "quick", "quick_scan", "jobs",
         "min_apache", "min_nginx", "min_routeros",
         "shodan_api_key", "shodan_key", "hibp_api_key", "hibp_key",
     ),
@@ -692,7 +694,7 @@ _SCOPE_SCHEMA: dict[str, tuple[str, ...]] = {
                           "content_discovery_wordlist", "content_discovery_rate"),
     "limits": ("edge_max_rate", "nmap_max_rate", "httpx_rate", "nuclei_rate",
                "amass_timeout_min", "tls_enum_ciphers", "nuclei_batch_size", "nuclei_batch_timeout_min",
-               "top_ports", "edge_ports"),
+               "top_ports", "edge_ports", "jobs"),
     "thresholds": ("min_apache", "min_nginx", "min_routeros"),
 }
 
