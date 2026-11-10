@@ -33,7 +33,7 @@ from recon.export import export_report_data
 from recon.report import generate_reports
 from recon.runner import (
     DRY_RUN, STOP, TOOL_FAILURES_FILE, TOOL_FAILURES_LOCK, Logger, dry_run_active, dry_run_report, have, http_get,
-    load_tool_failures, record_tool_failure, reset_phase_console, set_log_phase,
+    load_tool_failures, record_tool_failure, reset_phase_console, set_log_phase, terminate_children,
 )
 from recon.resilience import BREAKERS
 from recon.venv_manager import ensure_venv
@@ -393,6 +393,44 @@ def _salvage_report(ctx: RunContext, dm: DependencyManager, log: Logger) -> None
         log.error(f"Could not generate any report: {exc}")
 
 
+def _hard_exit(code: int) -> None:
+    """Leave the process now, without joining threads (tests patch this)."""
+    os._exit(code)
+
+
+def _force_exit(ctx: RunContext, log: Logger, running: Sequence[str]) -> None:
+    """Second Ctrl-C while --jobs phases drain: exit 130 right away.
+
+    No report salvage here: the abandoned phase threads are still writing their
+    evidence files, so triage would read half-written output, and it can take a
+    while - the opposite of what a second Ctrl-C asks for. ``--report-only`` or
+    ``--resume`` pick the run up later (finished units are on disk).
+
+    os._exit is needed because Python joins ThreadPoolExecutor workers at
+    interpreter exit, which is exactly the wait being skipped. Child commands:
+    the terminal sent SIGINT to the whole foreground process group, so they
+    normally died with both Ctrl-Cs; any still alive (tool ignoring SIGINT, a
+    signal sent to Scylax alone) gets SIGTERM from terminate_children(), so
+    none is left orphaned. Docker clients forward it to their container."""
+    try:
+        log.error("Second Ctrl-C - not waiting for the running phases "
+                  f"({', '.join(running) or '-'}); exiting now without a report")
+        n = terminate_children()
+        if n:
+            log.warn(f"Sent SIGTERM to {n} command(s) still running")
+        log.info("Recovery:")
+        log.info(f"  resume what's left:  python3 scylax.py -s {ctx.scope.path} -d {ctx.run_date} --resume")
+        log.info(f"  build the report:    python3 scylax.py --report-only {ctx.run_dir}")
+    except BaseException:
+        pass
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except Exception:
+            pass
+    _hard_exit(130)
+
+
 def _print_recovery_hints(ctx: RunContext, log: Logger, *, interrupted: bool, crashed: Sequence[str]) -> None:
     """Tell the user exactly how to pick up an incomplete run."""
     if crashed:
@@ -540,28 +578,34 @@ def _execute_phase(
     """Run one phase with its prologue, crash containment, tool-failure check and
     checkpoint; return a scheduler outcome. May run in a worker thread (--jobs)."""
     fn = PHASE_MAP[p]
-    DRY_RUN.phase = p
-    if not args.resume:  # --resume keeps console evidence + finished units of an interrupted phase
-        reset_phase_console(ctx.console_dir, p)
-        checkpoint.clear_units(ctx.run_dir, p)
-    _clear_tool_failures(ctx.run_dir, p)  # re-recorded by the units that re-run
-    checkpoint.clear(ctx.run_dir, p)
+    stage = "prologue"
     try:
+        DRY_RUN.phase = p
+        if not args.resume:  # --resume keeps console evidence + finished units of an interrupted phase
+            reset_phase_console(ctx.console_dir, p)
+            checkpoint.clear_units(ctx.run_dir, p)
+        _clear_tool_failures(ctx.run_dir, p)  # re-recorded by the units that re-run
+        checkpoint.clear(ctx.run_dir, p)
+        stage = "phase"
         fn(ctx, dm, log)
+        stage = "epilogue"
+        failed = [(tool, why) for ph, tool, why in load_tool_failures(ctx.run_dir) if ph == p]
+        for tool, why in failed:
+            log.warn(f"{tool} failed in phase {p} ({why}) - its results are missing; findings it would report are not re-checked")
+        if not failed and not dry_run_active() and p != "T":
+            checkpoint.mark_done(ctx.run_dir, p, scope_sig)
     except KeyboardInterrupt:
         log.warn(f"Interrupted during phase {p} - stopping and salvaging a report from the evidence so far")
         return scheduler.INTERRUPTED
     except Exception as exc:
-        # The phase's own code crashed (not an external tool, which run_cmd
-        # already contains). Keep the remaining phases and the report alive.
+        # The phase's own code - or Scylax's bookkeeping around it (prologue:
+        # console reset, checkpoint clean-up; epilogue: failure check,
+        # checkpoint) - crashed. Not an external tool, which run_cmd already
+        # contains. Record it and keep the remaining phases and the report alive.
         _record_phase_crash(ctx, p, exc, log)
-        log.error(f"Phase {p} crashed ({type(exc).__name__}: {exc}) - continuing with the remaining phases")
+        where = "" if stage == "phase" else f" in its {stage}"
+        log.error(f"Phase {p} crashed{where} ({type(exc).__name__}: {exc}) - continuing with the remaining phases")
         return scheduler.CRASHED
-    failed = [(tool, why) for ph, tool, why in load_tool_failures(ctx.run_dir) if ph == p]
-    for tool, why in failed:
-        log.warn(f"{tool} failed in phase {p} ({why}) - its results are missing; findings it would report are not re-checked")
-    if not failed and not dry_run_active() and p != "T":
-        checkpoint.mark_done(ctx.run_dir, p, scope_sig)
     return scheduler.FAILED if failed else scheduler.OK
 
 
@@ -790,6 +834,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 runnable=lambda p: _phase_runnable(ctx, log, p, scope_sig, args),
                 on_interrupt=on_interrupt,
             )
+        except scheduler.ForcedExit as exc:
+            _force_exit(ctx, log, exc.running)  # does not return
+            raise
         finally:
             STOP.clear()
         crashed = [p for p, outcome in outcomes.items() if outcome == scheduler.CRASHED]

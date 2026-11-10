@@ -1248,8 +1248,8 @@ _PHASE_BY_PREFIX: tuple[tuple[str, str], ...] = (
 _TOOLS_BY_PREFIX: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("nuclei:", ("nuclei",)),
     ("secret-leak:", ("gitleaks", "trufflehog", "git")),
-    ("content-disc:", ("gobuster",)),
-    ("traversal:", ("gobuster",)),
+    ("content-disc:", ("gobuster", "content-probe")),
+    ("traversal:", ("gobuster", "traversal-probe")),
     ("takeover:", ("dig",)),
     ("mgmt:", ("nmap",)), ("ssh:", ("nmap",)), ("ssh-weak:", ("nmap",)), ("apache:", ("nmap",)),
     ("nginx:", ("nmap",)), ("routeros:", ("nmap",)), ("fakecert:", ("nmap",)), ("fw-admin:", ("nmap",)),

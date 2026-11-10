@@ -54,6 +54,10 @@ TOOL_FAILURES_LOCK = threading.RLock()  # tool_failures.tsv
 # command or request a worker would start raises KeyboardInterrupt instead.
 STOP = threading.Event()
 
+# Commands run_cmd is running right now (any thread), for terminate_children().
+_LIVE_PROCS: set[subprocess.Popen[str]] = set()
+_LIVE_PROCS_LOCK = threading.Lock()
+
 _LOG_CTX = threading.local()
 
 
@@ -147,31 +151,13 @@ def run_cmd(
         DRY_RUN.commands.append((DRY_RUN.phase, shlex.join(cmd_list)))
         return CmdResult(args=cmd_list, returncode=0, stdout="", stderr="")
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             cmd_list,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             errors="replace",
-            timeout=timeout,
             cwd=cwd,
-            check=False,
-        )
-        return CmdResult(
-            args=cmd_list,
-            returncode=proc.returncode,
-            stdout=proc.stdout,
-            stderr=proc.stderr,
-            timed_out=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        out = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-        err = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
-        return CmdResult(
-            args=cmd_list,
-            returncode=124,
-            stdout=out,
-            stderr=err,
-            timed_out=True,
         )
     except OSError as exc:
         return CmdResult(
@@ -181,6 +167,50 @@ def run_cmd(
             stderr=str(exc),
             timed_out=False,
         )
+    with _LIVE_PROCS_LOCK:
+        _LIVE_PROCS.add(proc)
+    try:
+        with proc:
+            try:
+                out, err = proc.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                out, err = proc.communicate()
+                return CmdResult(args=cmd_list, returncode=124, stdout=out or "", stderr=err or "", timed_out=True)
+            except BaseException:
+                proc.kill()  # as subprocess.run does (Ctrl-C, ...)
+                raise
+            return CmdResult(
+                args=cmd_list,
+                returncode=proc.returncode,
+                stdout=out,
+                stderr=err,
+                timed_out=False,
+            )
+    finally:
+        with _LIVE_PROCS_LOCK:
+            _LIVE_PROCS.discard(proc)
+
+
+def terminate_children() -> int:
+    """SIGTERM every command run_cmd still has running; return how many.
+
+    Used on a forced exit (second Ctrl-C while --jobs phases drain): the worker
+    threads that own those commands are abandoned, so nobody else would reap
+    them. Children usually got the terminal's SIGINT already (same foreground
+    process group); this covers the rest (a signal sent to Scylax alone, a
+    tool that ignores SIGINT). Never raises."""
+    with _LIVE_PROCS_LOCK:
+        procs = list(_LIVE_PROCS)
+    n = 0
+    for proc in procs:
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+                n += 1
+        except Exception:
+            pass
+    return n
 
 
 def record_virtual_cmd(
