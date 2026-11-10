@@ -6,8 +6,6 @@ Authenticated, read-only configuration posture audit across SaaS tenants.
 from __future__ import annotations
 
 import importlib
-from pathlib import Path
-from typing import Any
 
 from recon.config import RunContext
 from recon.deps import DependencyManager
