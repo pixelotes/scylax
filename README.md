@@ -385,6 +385,7 @@ Key settings in `scopes/example.toml`:
 | `-D`, `--docker` | Run supported tools via Docker containers instead of native binaries |
 | `--dry-run` | List the commands and HTTP requests each phase would issue, run nothing and write no evidence. Commands that depend on earlier phases' results, and requests that are only made after a first response qualifies, cannot be listed |
 | `--resume` | Skip phases already completed (with no tool failure) in this run folder; editing the scope file invalidates them. `gaps.txt` is kept, so gaps accumulate |
+| `--jobs N` | Run up to N independent phases concurrently (default `1`; or `SCYLAX_JOBS`, or scope `jobs`). Only passive/API/offline phases overlap: phases that send traffic to the targets still run one at a time, so the traffic intensity is unchanged |
 | `--doctor` | One-shot health check (Python, tools, scope, API keys, egress IP, next command) and exit; `0` if nothing blocks a run, `1` otherwise |
 | `--check-deps` | Print dependency status table and exit |
 | `--check-config` | Validate the scope file (unknown keys, missing files, empty sections) and exit |

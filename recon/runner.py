@@ -10,6 +10,7 @@ import shutil
 import ssl
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -40,6 +41,32 @@ class _DryRun:
 
 DRY_RUN = _DryRun()
 
+# Phases may run concurrently (--jobs, see recon/scheduler.py) and some phases
+# use their own thread pools, so every read-modify-write of a shared run file
+# goes through one of these locks.
+_STDERR_LOCK = threading.Lock()   # one log line at a time on stderr
+_GAPS_LOCK = threading.Lock()     # gaps.txt read-dedupe-append
+CONSOLE_LOCK = threading.RLock()  # console/commands.jsonl and console/<phase>.log
+TOOL_FAILURES_LOCK = threading.RLock()  # tool_failures.tsv
+
+# Set by the scheduler when the operator pressed Ctrl-C while phases run in
+# worker threads (only the main thread receives KeyboardInterrupt): the next
+# command or request a worker would start raises KeyboardInterrupt instead.
+STOP = threading.Event()
+
+_LOG_CTX = threading.local()
+
+
+def set_log_phase(phase: str) -> None:
+    """Prefix this thread's log lines with '[phase X]' ('' to stop). Used only
+    when phases run concurrently, so a sequential run prints exactly as before."""
+    _LOG_CTX.phase = phase
+
+
+def _check_stop() -> None:
+    if STOP.is_set():
+        raise KeyboardInterrupt
+
 
 def dry_run_active() -> bool:
     return DRY_RUN.active
@@ -53,11 +80,15 @@ class Logger:
         if DRY_RUN.active and DRY_RUN.phase:
             return  # phase results are empty in a dry run: their messages would only mislead
         msg = redact(msg)
-        if sys.stderr.isatty():
-            sys.stderr.write(f"\033[{code}m{msg}\033[0m\n")
-        else:
-            sys.stderr.write(f"{msg}\n")
-        sys.stderr.flush()
+        tag = getattr(_LOG_CTX, "phase", "")
+        if tag:
+            msg = f"[phase {tag}] {msg}"
+        with _STDERR_LOCK:
+            if sys.stderr.isatty():
+                sys.stderr.write(f"\033[{code}m{msg}\033[0m\n")
+            else:
+                sys.stderr.write(f"{msg}\n")
+            sys.stderr.flush()
 
     def info(self, msg: str) -> None:
         self._c("36", f"[*] {msg}")
@@ -71,14 +102,15 @@ class Logger:
         msg = redact(msg)
         self._c("33", f"[!] {msg}")
         if self.gaps_file is not None:
-            self.gaps_file.parent.mkdir(parents=True, exist_ok=True)
-            existing = (
-                self.gaps_file.read_text(encoding="utf-8", errors="replace").splitlines()
-                if self.gaps_file.is_file() else []
-            )
-            if msg not in existing:
-                with self.gaps_file.open("a", encoding="utf-8") as f:
-                    f.write(f"{msg}\n")
+            with _GAPS_LOCK:
+                self.gaps_file.parent.mkdir(parents=True, exist_ok=True)
+                existing = (
+                    self.gaps_file.read_text(encoding="utf-8", errors="replace").splitlines()
+                    if self.gaps_file.is_file() else []
+                )
+                if msg not in existing:
+                    with self.gaps_file.open("a", encoding="utf-8") as f:
+                        f.write(f"{msg}\n")
 
     def error(self, msg: str) -> None:
         self._c("31", f"[-] {msg}")
@@ -110,6 +142,7 @@ def run_cmd(
     cwd: Path | None = None,
 ) -> CmdResult:
     cmd_list = [str(a) for a in args]
+    _check_stop()
     if DRY_RUN.active:
         DRY_RUN.commands.append((DRY_RUN.phase, shlex.join(cmd_list)))
         return CmdResult(args=cmd_list, returncode=0, stdout="", stderr="")
@@ -167,8 +200,6 @@ def record_virtual_cmd(
     title = redact(title)
     clean_out = redact(output.rstrip())
     block = f"$ {cmd_str}\n{clean_out}\n\n"
-    with log_path.open("a", encoding="utf-8") as f:
-        f.write(block)
 
     record = {
         "phase": str(phase),
@@ -180,13 +211,21 @@ def record_virtual_cmd(
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
     jsonl_path = console_dir / "commands.jsonl"
-    with jsonl_path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record) + "\n")
+    with CONSOLE_LOCK:
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(block)
+        with jsonl_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
 
 
 def reset_phase_console(console_dir: Path, phase: str) -> None:
     """Drop a phase's previous evidence so re-running it in the same run dir
     replaces its console output instead of appending a duplicate copy."""
+    with CONSOLE_LOCK:
+        _reset_phase_console(console_dir, phase)
+
+
+def _reset_phase_console(console_dir: Path, phase: str) -> None:
     log_path = console_dir / f"{phase}.log"
     if log_path.is_file():
         log_path.unlink()
@@ -245,19 +284,22 @@ def record_tool_failure(run_dir: Path, phase: str, tool: str, reason: str) -> No
     """Append a tool failure to <run_dir>/tool_failures.tsv (read by the CLI and triage)."""
     path = run_dir / TOOL_FAILURES_FILE
     line = f"{phase}\t{tool}\t{reason.replace(chr(9), ' ').replace(chr(10), ' ')[:200]}"
-    existing = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
-    if line not in existing:
-        with path.open("a", encoding="utf-8") as f:
-            f.write(line + "\n")
+    with TOOL_FAILURES_LOCK:
+        existing = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+        if line not in existing:
+            with path.open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
 
 
 def load_tool_failures(run_dir: Path) -> list[tuple[str, str, str]]:
     """(phase, tool, reason) for every tool that failed in a run."""
     path = run_dir / TOOL_FAILURES_FILE
-    if not path.is_file():
-        return []
+    with TOOL_FAILURES_LOCK:
+        if not path.is_file():
+            return []
+        text = path.read_text(encoding="utf-8", errors="replace")
     out = []
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+    for line in text.splitlines():
         parts = line.split("\t")
         if len(parts) >= 3:
             out.append((parts[0], parts[1], parts[2]))
@@ -338,6 +380,7 @@ def http_get(
     """GET a URL. ``max_bytes`` caps how much of the body is read (and asks the
     server for that range), so probes can classify a response without
     downloading it."""
+    _check_stop()
     if DRY_RUN.active:
         DRY_RUN.requests.append((DRY_RUN.phase, f"{method} {url}"))
         return HttpResponse(status=0, body="", headers={}, final_url=url, redirect_url="")
