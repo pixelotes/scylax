@@ -1,32 +1,69 @@
-# Scylax — Roadmap
+# Roadmap
 
-Propuesta de mejoras priorizadas. Principio rector: **no superar el techo de intrusividad actual** (content discovery de la fase C + comprobación de path traversal confirmada por firma). Los reportes siguen siendo *evidencia y candidatos para un humano*, no veredictos.
+Ground rules for everything below:
 
-## Prioridad alta
+- **Intrusiveness ceiling.** Nothing goes beyond what phase C already does
+  (content discovery plus signature-confirmed path traversal). No fuzzing,
+  injection payloads, brute force or higher rate limits.
+- **Evidence, not verdicts.** Outputs are candidate findings for a human
+  auditor to validate.
+- **Stdlib only.** No runtime pip dependencies. Dev tooling (linters, test
+  helpers) is fine.
 
-- [x] **Paralelismo entre fases y hosts.** *(Entre fases: `--jobs N` con `recon/scheduler.py`; las fases activas comparten un único carril, así que la intensidad contra los objetivos no sube.)* Hoy solo `phases/active.py` y `phases/content.py` usan `ThreadPoolExecutor`; OSINT, DNS, nmap por IP y cloud son secuenciales. Añadir pools por fase respetando los límites de `resilience.py`.
-- [x] **Reanudación real (`--resume`).** *(Hecho: checkpoints por unidad — IP/pasada nmap, lote nuclei, IP cloud, cuenta de brechas, IP Shodan, host de fase C. Pendiente: lookups CPE/CVE de fase 7 y fases 1 y 6.)* Ampliar `checkpoint.py` para reanudar fase a fase tras un fallo (`nmap`, `nuclei`, timeouts) sin repetir lo ya hecho.
-- [x] **Formatos de salida estándar.** *(Hecho: `findings.sarif` (SARIF 2.1.0) y `findings.csv` en cada run y con `--export`, generados desde `report_data.json` en `recon/export_formats.py`.)* Añadir **SARIF** y **CSV** además de `report_data.json` / `findings.jsonl`, para integrar con Jira, DefectDojo, etc.
-- [x] **Supresiones con caducidad.** *(Hecho: `scopes/<scope>.suppressions.toml` o `suppressions_file`; lo suprimido pasa a `suppressed.md` y a la tabla "Suppressed" del informe, con motivo, responsable y caducidad; al caducar vuelve como activo y `diff.md` lo marca "Reactivated".)* Fichero `suppressions.toml` (hallazgo, motivo, fecha de caducidad) para que lo aceptado no reaparezca en cada `diff.md`.
-- [x] **Diff entre runs más útil.** Tendencias (MTTR de resueltos, edad de persistentes) y resumen "qué cambió" en la cabecera de `report.html`, usando `findings_history.json`.
+## Done
 
-## Prioridad media
+| Item | Where | PR |
+|---|---|---|
+| Run independent phases concurrently (`--jobs N`). Phases that send traffic to targets share one lane, so per-target intensity is unchanged. | `recon/scheduler.py` | #17 |
+| Resume inside a phase (`--resume`): nmap pass per IP, edge IP, nuclei batch, cloud IP, breach-lookup account, Shodan IP, phase C host. | `recon/checkpoint.py` | #17 |
+| SARIF 2.1.0 and CSV exports, built from `report_data.json`. Suppressed findings are exported and marked. | `recon/export_formats.py` | #18 |
+| Expiring suppressions with reason, owner and expiry. Suppressed findings stay visible and come back when the suppression expires. | `recon/suppressions.py` | #18 |
+| Run-to-run trends: summary in `diff.md`, "What changed" card in the HTML report, MTTR, age buckets, oldest open high/critical findings. | `recon/trends.py` | #18 |
+| Ruff lint job in CI (pinned version, `ruff.toml`). | `.github/workflows/ci.yml` | #19, #20 |
 
-- [ ] **Dividir los módulos grandes.** `report.py` (~3.1k líneas), `phases/cloud.py` (~1.8k), `phases/osint.py` (~1.7k), `phases/triage.py` (~1.3k), `saas/github.py` (~1.3k). Separar plantillas HTML y un módulo por proveedor cloud.
-- [ ] **Tests de contrato para fuentes externas.** Fixtures grabados de crt.sh, NVD, HIBP y XposedOrNot, más un job nocturno opcional contra las APIs reales para detectar cambios de formato.
-- [ ] **CI ampliado.** Añadir `pyproject.toml`, `ruff`, `mypy` (modo suave), cobertura, `pip-audit` y escaneo de la imagen Docker (Trivy).
-- [ ] **Más proveedores SSPM.** Okta, Slack y API de administración de Atlassian, siguiendo la estructura de `recon/saas/`.
-- [ ] **Descubrimiento de assets pasivo.** Rangos y ASN del cliente vía BGP/RIPEstat, pivotes por certificado y por hash de favicon.
+## Next
 
-## Prioridad baja / pulido
+- [ ] **Contract tests for external sources.** Recorded fixtures for crt.sh,
+  NVD, HIBP, XposedOrNot and Shodan, so a change in their response format
+  fails a test instead of silently producing empty results. Optionally a
+  scheduled job that hits the real APIs.
+- [ ] **Finish CI.** `pyproject.toml` (tool config only, no packaging yet),
+  `mypy` in non-strict mode, coverage report, `pip-audit` for dev tooling,
+  Trivy scan of the Docker image.
+- [ ] **Gaps left by the resume work.**
+  - Phase 7 CPE/CVE lookups are cached in memory only; persist them per unit.
+  - Phases 1 and 6 restart from scratch.
+  - Phase C with the native probe marks a host done even when the adaptive
+    limiter gave up on it; it should be retried on resume.
+- [ ] **Gaps left by the scheduler.**
+  - A second Ctrl-C while running phases drain should force-exit.
+  - If a phase's setup (before the phase function runs) fails in a worker
+    thread, the crash is not written to `tool_failures.tsv`.
+- [ ] **Per-host parallelism inside phases.** OSINT, DNS, per-IP nmap and the
+  cloud annexes still process hosts one by one. Any pool must respect the
+  limits in `recon/resilience.py` and the active-traffic lane.
 
-- [ ] **Alertas más ricas.** Slack y email además de Teams/JSON en `notify.py`; resumen semanal de nuevos críticos.
-- [ ] **Programación CTEM.** `--schedule` o plantilla de cron / GitHub Action para el run mensual con comparación automática.
-- [ ] **Distribución.** Publicar con `pipx`/PyPI y la imagen en GHCR con tags por versión; añadir `CHANGELOG.md` y `SECURITY.md`.
-- [ ] **Reportes.** Exportación a PDF, filtros guardados en el HTML y un modo ejecutivo de una página.
+## Later
 
-## Orden sugerido
+- [ ] **Split the large modules.** `report.py` (~3.3k lines), `phases/cloud.py`
+  (~1.8k), `phases/osint.py` (~1.8k), `phases/triage.py` (~1.4k),
+  `saas/github.py` (~1.3k). Move the HTML templates out of `report.py`; one
+  module per cloud provider.
+- [ ] **More SaaS posture providers.** Okta, Slack, Atlassian admin API,
+  following the layout of `recon/saas/`.
+- [ ] **Passive asset discovery.** Organisation ranges and ASNs from BGP /
+  RIPEstat, certificate and favicon-hash pivots.
+- [ ] **Sample report.** `recon/sample_generator.py` has no suppressed
+  findings or trends; add them so the samples show the new sections.
 
-1. SARIF/CSV + supresiones con caducidad (máximo valor para el auditor, bajo coste).
-2. Paralelismo + `--resume` (mayor beneficio operativo).
-3. Tests de contrato + `pyproject.toml` con lint (evita roturas silenciosas).
+## Ideas
+
+- [ ] **Alerts.** Slack and email in `notify.py` (today: Teams and generic
+  JSON webhook); a weekly digest of new high/critical findings.
+- [ ] **Scheduled CTEM runs.** A cron or GitHub Actions template for the
+  monthly run.
+- [ ] **Distribution.** `pipx`/PyPI package, Docker image on GHCR with version
+  tags, a version constant (SARIF currently omits the tool version),
+  `CHANGELOG.md`, `SECURITY.md`.
+- [ ] **Report.** PDF export, saved filters in the HTML report, a one-page
+  executive summary.
