@@ -51,6 +51,22 @@ ACTIVE_LANE: frozenset[str] = frozenset({"3", "4", "4b", "5", "8", "C", "A", "G"
 
 OK, FAILED, CRASHED, INTERRUPTED = "ok", "failed", "crashed", "interrupted"
 
+
+
+class ForcedExit(BaseException):
+    """Second Ctrl-C while running phases drain: the operator wants out now.
+
+    Raised by ``run_phases`` (jobs > 1) instead of waiting any longer. Not a
+    KeyboardInterrupt subclass, so no ``except KeyboardInterrupt`` on the way
+    up mistakes it for the first, graceful interrupt. The worker threads are
+    still running: the caller must leave the process without joining them.
+    """
+
+    def __init__(self, running: Sequence[str]) -> None:
+        super().__init__(f"forced exit while phases still running: {' '.join(running) or '-'}")
+        self.running = list(running)
+
+
 _POLL_S = 0.2  # main thread wakes this often so Ctrl-C is handled promptly
 
 
@@ -93,6 +109,8 @@ def run_phases(
     With ``jobs > 1`` a KeyboardInterrupt in the main thread stops new phases
     from starting, calls ``on_interrupt`` (which should make running phases
     stop at their next command), and waits for the running phases to return.
+    A second KeyboardInterrupt while waiting stops the wait: queued work is
+    cancelled and ``ForcedExit`` is raised (running threads are left behind).
     """
     runnable = runnable or (lambda _p: True)
     order = list(dict.fromkeys(phases))
@@ -115,12 +133,22 @@ def run_phases(
     lane_busy = False
     stop = False
     interrupted = False
+    ctrl_c = 0  # KeyboardInterrupts received by this (main) thread
+    forced = False
 
     def _interrupt() -> None:
         nonlocal stop, interrupted
         if not interrupted and on_interrupt is not None:
             on_interrupt()
         stop = interrupted = True
+
+    def _ctrl_c() -> None:
+        nonlocal ctrl_c, forced
+        ctrl_c += 1
+        if ctrl_c >= 2:
+            forced = True
+            raise ForcedExit(sorted(running.values()))
+        _interrupt()
 
     pool = ThreadPoolExecutor(max_workers=jobs, thread_name_prefix="scylax-phase")
     try:
@@ -151,7 +179,7 @@ def run_phases(
             try:
                 done, _ = wait(list(running), timeout=_POLL_S, return_when=FIRST_COMPLETED)
             except KeyboardInterrupt:
-                _interrupt()
+                _ctrl_c()
                 continue
             for fut in done:
                 p = running.pop(fut)
@@ -165,18 +193,26 @@ def run_phases(
                 if outcomes[p] == INTERRUPTED:
                     _interrupt()
     finally:
-        # Interrupted (again) while draining: still wait for running phases,
-        # their threads cannot be killed and the report must see their files.
-        while True:
-            try:
-                pool.shutdown(wait=True)
-                break
-            except KeyboardInterrupt:
-                _interrupt()
+        if forced:
+            # Second Ctrl-C: do not wait; threads cannot be killed, the caller
+            # exits the process without joining them.
+            pool.shutdown(wait=False, cancel_futures=True)
+        else:
+            # Normally wait for running phases: the report must see their files.
+            while True:
+                try:
+                    pool.shutdown(wait=True)
+                    break
+                except KeyboardInterrupt:
+                    try:
+                        _ctrl_c()
+                    except ForcedExit:
+                        pool.shutdown(wait=False, cancel_futures=True)
+                        raise
     return outcomes, interrupted
 
 
 __all__ = [
-    "ACTIVE_LANE", "CRASHED", "FAILED", "INTERRUPTED", "LAST_PHASE", "OK", "PHASE_DEPS",
+    "ACTIVE_LANE", "CRASHED", "FAILED", "ForcedExit", "INTERRUPTED", "LAST_PHASE", "OK", "PHASE_DEPS",
     "effective_deps", "run_phases",
 ]
