@@ -174,10 +174,17 @@ runs. `properties` holds severity, asset ids, targets, CVEs, phase and status.
 
 **`findings.csv`** (RFC 4180, UTF-8 without BOM): columns `id, severity, title,
 rule, asset_ids, assets, targets, cves, phase, status, first_seen, age_days,
-evidence`. Multi-values are joined with `; `. `first_seen`/`age_days` come from the
+evidence, suppression_reason, suppression_owner, suppression_expires,
+suppression_ticket`. Multi-values are joined with `; `. `first_seen`/`age_days` come from the
 scope's `findings_history.json` when present. Cells starting with `= + - @`, TAB
 or CR get a leading `'` to neutralise spreadsheet formula injection (evidence is
 untrusted internet data).
+
+**Suppressed findings** (see [suppressions](configuration.md)) are exported too,
+never dropped: in SARIF they carry a native `suppressions` entry (`kind: external`,
+`status: accepted`, justification = reason + owner, expiry and ticket) and
+`properties.status: "suppressed"`, so code-scanning tools show them as dismissed;
+in CSV their `status` is `suppressed` and the `suppression_*` columns are filled.
 
 ## The AI bundle (`ai_bundle.md`)
 

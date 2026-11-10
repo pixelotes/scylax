@@ -57,7 +57,8 @@ LEVEL_BY_SEVERITY = {
 _SECURITY_SEVERITY = {"CRITICAL": 9.5, "HIGH": 8.0, "MEDIUM": 5.5, "LOW": 3.0, "INFO": 0.0}
 
 CSV_COLUMNS = ["id", "severity", "title", "rule", "asset_ids", "assets", "targets",
-               "cves", "phase", "status", "first_seen", "age_days", "evidence"]
+               "cves", "phase", "status", "first_seen", "age_days", "evidence",
+               "suppression_reason", "suppression_owner", "suppression_expires", "suppression_ticket"]
 
 _CVE_RE = re.compile(r"CVE-\d{4}-\d{4,}", re.I)
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
@@ -129,6 +130,17 @@ def _history(run_dir: Optional[Path]) -> Dict[str, Any]:
         return {}
 
 
+def _all_findings(doc: Dict[str, Any]) -> List[tuple]:
+    """(finding, suppression-or-None) for active candidates, then the auditor-
+    suppressed ones from ``doc["suppressed"]``. Suppressed findings are exported
+    too (marked, never dropped) so a tracker can close them as accepted."""
+    out: List[tuple] = [(f, None) for f in doc.get("findings", [])]
+    for row in doc.get("suppressed", []) or []:
+        supp = {k: row.get(k, "") for k in ("reason", "owner", "expires", "ticket")}
+        out.append((row, supp))
+    return out
+
+
 # ------------------------------------------------------------------ SARIF
 
 def build_sarif(doc: Dict[str, Any]) -> Dict[str, Any]:
@@ -136,7 +148,7 @@ def build_sarif(doc: Dict[str, Any]) -> Dict[str, Any]:
     rules: Dict[str, Dict[str, Any]] = {}
     results: List[Dict[str, Any]] = []
 
-    for f in doc.get("findings", []):
+    for f, supp in _all_findings(doc):
         sev = (f.get("severity") or "INFO").upper()
         rid = rule_id(f.get("key", ""))
         phase = _phase_of(f.get("key", ""))
@@ -176,7 +188,7 @@ def build_sarif(doc: Dict[str, Any]) -> Dict[str, Any]:
         evidence = (f.get("evidence") or "").strip()
         if evidence:
             text += "\n\nEvidence: " + evidence[:_EVIDENCE_IN_MESSAGE]
-        results.append({
+        result: Dict[str, Any] = {
             "ruleId": rid,
             "level": severity_level(sev),
             "message": {"text": text},
@@ -189,9 +201,19 @@ def build_sarif(doc: Dict[str, Any]) -> Dict[str, Any]:
                 "targets": targets,
                 "cves": _cves_of(f),
                 "phase": phase,
-                "status": "candidate",
+                "status": "suppressed" if supp else "candidate",
             },
-        })
+        }
+        if supp:
+            # SARIF 2.1.0 §3.35: an external, accepted suppression (the auditor's decision).
+            justification = supp["reason"] + "".join(
+                f"; {label}: {supp[k]}" for k, label in
+                (("owner", "owner"), ("expires", "expires"), ("ticket", "ticket")) if supp.get(k))
+            result["suppressions"] = [{
+                "kind": "external", "status": "accepted", "justification": justification,
+                "properties": {k: v for k, v in supp.items() if v},
+            }]
+        results.append(result)
 
     return {
         "$schema": SARIF_SCHEMA,
@@ -231,7 +253,8 @@ def build_csv(doc: Dict[str, Any], run_dir: Optional[Path] = None) -> str:
     buf = io.StringIO(newline="")
     w = csv.writer(buf, lineterminator="\r\n")  # RFC 4180: CRLF
     w.writerow(CSV_COLUMNS)
-    for f in doc.get("findings", []):
+    for f, supp in _all_findings(doc):
+        supp = supp or {}
         key = f.get("key", "")
         asset_ids = _asset_ids(f)
         first = (history.get(key) or {}).get("first_seen", "")
@@ -240,9 +263,10 @@ def build_csv(doc: Dict[str, Any], run_dir: Optional[Path] = None) -> str:
             rule_id(key), "; ".join(asset_ids),
             "; ".join(labels.get(a, a) for a in asset_ids),
             "; ".join(split_targets(f.get("target", ""))),
-            "; ".join(_cves_of(f)), _phase_of(key), "candidate",
+            "; ".join(_cves_of(f)), _phase_of(key), "suppressed" if supp else "candidate",
             first, _age_days(first, run_date) if first else "",
             f.get("evidence", ""),
+            supp.get("reason", ""), supp.get("owner", ""), supp.get("expires", ""), supp.get("ticket", ""),
         ]
         w.writerow([csv_safe(c) for c in row])
     return buf.getvalue()

@@ -141,6 +141,40 @@ class TestCsv(unittest.TestCase):
         self.assertEqual(row["evidence"], "l1\nl2")
 
 
+SUPPRESSED = {"key": "spf:other.example.com", "severity": "LOW", "title": "SPF soft fail",
+              "evidence": "", "target": "other.example.com", "reason": "Accepted: parked domain",
+              "owner": "jdoe", "expires": "2027-03-31", "ticket": "SEC-1"}
+
+
+class TestSuppressedExported(unittest.TestCase):
+    def _doc(self) -> dict:
+        doc = _doc()
+        doc["suppressed"] = [dict(SUPPRESSED)]
+        return doc
+
+    def test_sarif_marks_suppression(self) -> None:
+        results = build_sarif(self._doc())["runs"][0]["results"]
+        self.assertEqual(len(results), len(FINDINGS) + 1)
+        active = [r for r in results if "suppressions" not in r]
+        self.assertEqual(len(active), len(FINDINGS))
+        sup = [r for r in results if "suppressions" in r]
+        self.assertEqual(len(sup), 1)
+        s = sup[0]["suppressions"][0]
+        self.assertEqual((s["kind"], s["status"]), ("external", "accepted"))
+        self.assertIn("parked domain", s["justification"])
+        self.assertIn("2027-03-31", s["justification"])
+        self.assertEqual(sup[0]["properties"]["status"], "suppressed")
+
+    def test_csv_marks_suppression(self) -> None:
+        rows = list(csv.DictReader(io.StringIO(build_csv(self._doc()))))
+        sup = [r for r in rows if r["status"] == "suppressed"]
+        self.assertEqual(len(sup), 1)
+        self.assertEqual(sup[0]["suppression_owner"], "jdoe")
+        self.assertEqual(sup[0]["suppression_expires"], "2027-03-31")
+        self.assertEqual(sum(r["status"] == "candidate" for r in rows), len(FINDINGS))
+        self.assertTrue(all(r["suppression_reason"] == "" for r in rows if r["status"] == "candidate"))
+
+
 class TestFilesWritten(unittest.TestCase):
     def test_export_report_data_writes_both(self) -> None:
         with tempfile.TemporaryDirectory() as td:
