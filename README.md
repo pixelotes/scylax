@@ -297,6 +297,13 @@ docker build -t scylax .                         # full
 docker build -t scylax:core --target core .      # lighter, no cloud/SaaS CLIs
 ```
 
+**Auditing the image's Python dependencies.** Scylax has no runtime deps, but the theHarvester, SpiderFoot and Prowler virtualenvs under `/opt/venvs` do. `scripts/audit-image-deps.sh [IMAGE] [OUT_DIR]` lists each venv's installed packages (via `importlib.metadata`, since uv venvs have no pip), runs a pinned `pip-audit` on them (needs `pip-audit` or `uvx` plus Docker) and writes `summary.md` and JSON reports to `OUT_DIR`; git/local installs (e.g. theHarvester itself) are listed as "not auditable". The `Dependency audit` workflow does the same on changes to the `Dockerfile` or audit files, weekly, and on demand (`full: true` adds Prowler). It fails only on findings with a fixed version available (`FAIL_ON=any|fixable|never` locally); accepted risks go, with a reason, in `.github/pip-audit-ignore.txt`, which currently baselines the old `cryptography`/`lxml`/`pyopenssl` pins in SpiderFoot's `requirements.txt`.
+
+```bash
+docker build -t scylax:core --target core .
+scripts/audit-image-deps.sh scylax:core
+```
+
 Scylax reads `scopes/` and writes `runs/` relative to the working directory, which in the image is `/work`. Mount the folder that holds them (keep real scopes and evidence outside this repository):
 
 ```bash
