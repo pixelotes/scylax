@@ -12,7 +12,6 @@ import io
 import os
 import re
 import shlex
-import shutil
 import time
 from collections import defaultdict
 from pathlib import Path

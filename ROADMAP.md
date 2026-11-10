@@ -14,7 +14,7 @@ Propuesta de mejoras priorizadas. Principio rector: **no superar el techo de int
 
 - [ ] **Dividir los módulos grandes.** `report.py` (~3.1k líneas), `phases/cloud.py` (~1.8k), `phases/osint.py` (~1.7k), `phases/triage.py` (~1.3k), `saas/github.py` (~1.3k). Separar plantillas HTML y un módulo por proveedor cloud.
 - [ ] **Tests de contrato para fuentes externas.** Fixtures grabados de crt.sh, NVD, HIBP y XposedOrNot, más un job nocturno opcional contra las APIs reales para detectar cambios de formato.
-- [ ] **CI ampliado.** Añadir `pyproject.toml`, `ruff`, `mypy` (modo suave), cobertura, `pip-audit` y escaneo de la imagen Docker (Trivy).
+- [ ] **CI ampliado.** *(Hecho: `ruff` en CI, versión fijada, config en `ruff.toml`. Pendiente: `mypy`, cobertura, `pip-audit`, Trivy.)* Añadir `pyproject.toml`, `ruff`, `mypy` (modo suave), cobertura, `pip-audit` y escaneo de la imagen Docker (Trivy).
 - [ ] **Más proveedores SSPM.** Okta, Slack y API de administración de Atlassian, siguiendo la estructura de `recon/saas/`.
 - [ ] **Descubrimiento de assets pasivo.** Rangos y ASN del cliente vía BGP/RIPEstat, pivotes por certificado y por hash de favicon.
 

@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest import mock
 
 from recon.deps import DependencyManager, PHASE_DEPENDENCIES
-from recon.plugins import PLUGINS, get_plugin, list_plugins
+from recon.plugins import get_plugin, list_plugins
 from recon.plugins.base import PluginKind
 from recon.runner import CmdResult
 

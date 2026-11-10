@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from typing import Sequence
 
 from recon.plugins.base import Plugin, PluginKind
 from recon.runner import have, run_cmd
