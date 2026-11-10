@@ -14,6 +14,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
+from recon.suppressions import load_suppressed
 from recon.assets import (
     SEV_RANK,
     asset_label,
@@ -178,6 +179,8 @@ class RunData:
         self.run_dir = run_dir.resolve()
         self.meta: dict[str, str] = self._load_meta()
         self.findings: list[dict[str, str]] = self._load_findings()
+        # Auditor-suppressed candidates (still observed; listed with reason/owner/expiry)
+        self.suppressed: list[dict[str, str]] = load_suppressed(self.run_dir)
         self.diff_content, self.diff_summary = self._load_diff()
         self.gaps: list[str] = self._load_gaps()
         self.tool_versions: list[str] = self._load_tool_versions()
@@ -304,6 +307,8 @@ class RunData:
         diff_path = self.run_dir / "diff.md"
         content = _safe_read_text(diff_path)
         summary: dict[str, list[str]] = {"New": [], "Reappeared": [], "Resolved": [], "Not re-checked": [], "Persisting": []}
+        # Suppression buckets appear in diff.md only when suppressions are in play
+        extra_sections = ("Reactivated (suppression expired)", "Suppressed (accepted)")
         if content:
             cur_section = ""
             for line in content.splitlines():
@@ -318,6 +323,9 @@ class RunData:
                     cur_section = "Reappeared"
                 elif s.startswith("## Not re-checked"):
                     cur_section = "Not re-checked"
+                elif s.startswith("## ") and s[3:].startswith(extra_sections):
+                    cur_section = next(x for x in extra_sections if s[3:].startswith(x))
+                    summary.setdefault(cur_section, [])
                 elif cur_section and s.startswith("- "):
                     summary[cur_section].append(s[2:].strip())
         return content, summary
@@ -808,6 +816,7 @@ class RunData:
             "low": sev_counts["LOW"],
             "info": sev_counts["INFO"],
             "total_findings": len(self.findings),
+            "suppressed": len(self.suppressed),
             "subdomains": subdomains_cnt,
             "new_subdomains": len(self.new_subdomains),
             "gone_subdomains": len(self.gone_subdomains),
@@ -828,6 +837,58 @@ class RunData:
 # =====================================================================
 # Markdown Report Generator
 # =====================================================================
+
+def _suppressed_markdown(data: RunData) -> list[str]:
+    """'Suppressed' table (section 2a): auditor-accepted candidates, still observed."""
+    if not data.suppressed:
+        return []
+    lines = [
+        "## 2a. Suppressed (accepted by the auditor)",
+        "",
+        "*Still observed this run; excluded from the counts above by a recorded decision. "
+        "They become active again when the suppression expires.*",
+        "",
+        "| Severity | Finding Title | Target | Reason | Owner | Expires | Ticket | Rule Key |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for f in data.suppressed:
+        lines.append(
+            f"| `{f['severity'].upper()}` | {_escape_md_cell(f['title'])} | {_escape_md_cell(f['target']) or '-'} "
+            f"| {_escape_md_cell(f['reason'])} | {_escape_md_cell(f['owner'])} | {_escape_md_cell(f['expires'])} "
+            f"| {_escape_md_cell(f['ticket']) or '-'} | `{_escape_md_cell(f['key'])}` |"
+        )
+    lines.append("")
+    return lines
+
+
+def _suppressed_html(data: RunData) -> str:
+    """'Suppressed' card for the Findings tab ('' when nothing is suppressed)."""
+    if not data.suppressed:
+        return ""
+    rows = "".join(
+        f"<tr><td><span class=\"badge badge-{html.escape(f['severity'].lower())}\">{html.escape(f['severity'].upper())}</span></td>"
+        f"<td><strong>{html.escape(f['title'])}</strong></td>"
+        f"<td class=\"mono\">{_target_html(f['target'])}</td>"
+        f"<td>{html.escape(f['reason'])}</td><td>{html.escape(f['owner'])}</td>"
+        f"<td class=\"mono\">{html.escape(f['expires'])}</td><td>{html.escape(f['ticket']) or '-'}</td>"
+        f"<td><code class=\"pill\">{html.escape(f['key'])}</code></td></tr>"
+        for f in data.suppressed
+    )
+    return f"""<div class="card" id="suppressed-findings">
+      <div class="card-header">
+        <span class="card-title">Suppressed ({len(data.suppressed)}) &mdash; accepted by the auditor, still observed</span>
+      </div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table id="suppressed-table">
+            <thead><tr><th style="width: 110px;">Severity</th><th>Finding Title</th><th>Target</th><th>Reason</th>
+            <th>Owner</th><th>Expires</th><th>Ticket</th><th style="width: 220px;">Rule Key</th></tr></thead>
+            <tbody>{rows}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>"""
+
 
 def generate_markdown(data: RunData) -> str:
     """Generate detailed GitHub Flavored Markdown assessment report."""
@@ -908,6 +969,7 @@ def generate_markdown(data: RunData) -> str:
     else:
         lines.append("*No automated finding candidates identified for this run.*")
     lines.append("")
+    lines.extend(_suppressed_markdown(data))
 
     # Section 2b: Asset inventory
     lines.append("## 2b. Asset Inventory")
@@ -2067,6 +2129,7 @@ def generate_html(data: RunData) -> str:
         </div>
       </div>
     </div>
+    {_suppressed_html(data)}
   </section>
 
   <!-- ================================================================= -->

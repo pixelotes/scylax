@@ -1,0 +1,38 @@
+# Scylax finding suppressions for scopes/example.toml (Contoso).
+#
+# A suppression records an auditor decision about a finding candidate:
+# accepted risk, false positive or compensating control. Suppressed findings
+# are NOT deleted: they leave the active list (findings_auto.*, KPIs, report
+# counts) and appear in suppressed.md and in the report's "Suppressed" table.
+# When `expires` passes they become active again automatically.
+#
+# Picked up automatically as scopes/<scope-name>.suppressions.toml, or set
+# `suppressions_file = "..."` in the scope. Check it with --check-config.
+#
+# Each [[suppress]] entry needs:
+#   key    exact finding key (findings_auto.tsv column 2), or
+#   rule   rule id = the key up to the first ':' (e.g. "cors", "spf", "cve-high"; globs ok)
+#   target optional glob on the finding target / host (with rule or key)
+#   reason, owner, expires (TOML date, inclusive; keep it within a year)
+#   ticket optional tracker reference
+
+[[suppress]]
+key = "dnssec:fabrikam.io"
+reason = "Accepted risk: registrar does not support DNSSEC; migration planned"
+owner = "jdoe"
+expires = 2027-06-30
+ticket = "SEC-1042"
+
+[[suppress]]
+rule = "cors"
+target = "*.dev.contoso.com"
+reason = "Compensating control: dev hosts are behind the corporate VPN and WAF"
+owner = "asmith"
+expires = 2027-03-31
+
+[[suppress]]
+key = "ssh:198.51.100.12"
+reason = "False positive: port 22 is a tarpit on the mail relay, no SSH daemon"
+owner = "jdoe"
+expires = 2027-01-31
+ticket = "SEC-1077"

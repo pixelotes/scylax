@@ -493,6 +493,8 @@ runs/<scope>/<date>/
                            every finding, and the explicit asset<->finding relations. The stable contract for a
                            downstream report generator; written every run, regenerate alone with --export.
   findings_auto.md / .tsv  Prioritised finding candidates (Asset ID column, all affected assets; rows grouped by asset)
+  suppressed.md / .tsv     Candidates the auditor accepted in scopes/<scope>.suppressions.toml (reason, owner,
+                           expiry); out of the active counts, back as active when the suppression expires
   findings.jsonl           The same candidates, one JSON object per line (status "candidate"), for trackers/scripts
   assets.jsonl             Hostnames, live web URLs and open TCP ports collected by the run
   assets.tsv               Asset inventory: id, type, label, key, product/version, open ports, findings and CVEs per asset
@@ -527,6 +529,7 @@ runs/<scope>/<date>/
 ## Monthly runs (CTEM)
 
 - Use a fresh `runs/<scope>/<date>/` per run so `diff.md` and `findings_history.json` have a baseline.
+- Record accepted risks / false positives in `scopes/<scope>.suppressions.toml` (owner, reason, expiry; see `scopes/example.suppressions.toml` and [docs/configuration.md](docs/configuration.md#finding-suppressions-suppressionstoml)) so they stop showing as new each month without disappearing.
 - Set `owned_ips_file` (e.g. the Azure public-IP export) so CDN/SaaS/shared-cloud IPs are never port-scanned.
 - Prefer a full run (no `-q`/`-qq`) once a month; quick modes are for ad-hoc checks.
 - Export `NVD_API_KEY` when `*.shodan.io` is blocked: CVE correlation then uses NVD at ~10x the keyless rate.

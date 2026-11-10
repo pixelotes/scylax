@@ -14,6 +14,7 @@ runs/<scope>/<date>/
   report_data.json         Consolidated, versioned export: assets + findings + relations + meta (see below)
   ai_bundle.md             Compact, self-contained companion for LLM analysis (see below)
   findings_auto.md / .tsv  Prioritised finding candidates (Asset ID + Target columns; rows grouped by asset)
+  suppressed.md / .tsv     Candidates hidden by an auditor suppression: severity, finding, target, reason, owner, expires, ticket
   assets.tsv               Asset inventory: id, type, label, key, product/version, open ports, findings, CVEs
   diff.md                  New / Reappeared / Resolved / Not re-checked / Persisting vs. previous run
   run.meta                 Scope, date, authorisation, phases, Docker mode, egress IP
@@ -49,9 +50,22 @@ that, `diff.md` classifies each finding relative to the previous run:
 | **Resolved** | Present last run, gone now — **only** if the producing phase ran in both runs. |
 | **Not re-checked** | The phase/tool that would confirm it didn't run (see `tool_failures.tsv`). Never counted as resolved. |
 | **Persisting** | Present in both runs. |
+| **Suppressed (accepted)** | Newly covered by a suppression this run. Never counted as resolved or new. Shown only when it has entries. |
+| **Reactivated (suppression expired)** | Active again because its suppression expired (or was removed). Shown only when it has entries; high/critical ones are alerted like new findings. |
 
 This "not re-checked ≠ resolved" rule is what makes the diff trustworthy across
 runs where a tool was temporarily unavailable.
+
+### Suppressed findings
+
+A suppression (see [configuration](configuration.md#finding-suppressions-suppressionstoml))
+moves a candidate out of the active outputs — `findings_auto.md`/`.tsv`,
+`findings.jsonl`, the KPIs and severity counts — into `suppressed.md` /
+`suppressed.tsv` and the **Suppressed** table of `report.md` (section 2a) and
+`report.html` (Findings tab), with its severity, reason, owner, expiry and
+ticket. `findings_auto.md` points to `suppressed.md` when anything is
+suppressed. Suppressed findings are still observed, so `findings_history.json`
+keeps recording them, and `report_data.json` lists them under `suppressed`.
 
 ## Assets
 
@@ -121,7 +135,8 @@ ignore unknown fields.
   "diff":     { "New": [...], "Reappeared": [...], "Resolved": [...], "Not re-checked": [...], "Persisting": [...] },
   "assets":   [ { id, type, type_label, key, label, pseudo, cloud, ports, cves, finding_ids, worst_severity, … } ],
   "findings": [ { id, key, severity, title, evidence, target, asset_id, asset_ids, asset_keys } ],
-  "relations":[ { finding_id, asset_id, primary } ]
+  "relations":[ { finding_id, asset_id, primary } ],
+  "suppressed":[ { key, severity, title, evidence, target, reason, owner, expires, ticket } ]
 }
 ```
 

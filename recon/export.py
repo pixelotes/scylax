@@ -229,6 +229,9 @@ def build_report_data(data: Any) -> Dict[str, Any]:
         "assets": assets_out,
         "findings": findings_out,
         "relations": relations,
+        # Auditor-suppressed candidates (not in findings/KPIs): key, severity, title,
+        # evidence, target, reason, owner, expires (YYYY-MM-DD), ticket
+        "suppressed": [dict(r) for r in (getattr(data, "suppressed", []) or [])],
     }
 
 

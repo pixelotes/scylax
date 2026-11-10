@@ -22,7 +22,7 @@ CAP_ROWS = 300
 # from). Order is reading order for a human/LLM. Missing files are skipped.
 CORE_FILES: tuple[str, ...] = (
     "run.meta", "tool_versions.txt", "gaps.txt", "tool_failures.tsv",
-    "findings_auto.tsv", "diff.md",
+    "findings_auto.tsv", "suppressed.tsv", "diff.md",
     "osint/apex.txt", "osint/subdomain_counts.txt",
     "osint/new_subdomains.txt", "osint/gone_subdomains.txt", "osint/discovered_targets.txt",
     "osint/ip_orgs.tsv", "osint/emails.tsv",
