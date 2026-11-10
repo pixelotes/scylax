@@ -324,7 +324,6 @@ def _write_tsv(path: Path, asset_list: List[Dict[str, Any]]) -> None:
     try:
         rows = ["id\ttype\tlabel\tkey\tproduct\topen_ports\tfindings\tcves"]
         for a in asset_list:
-            fid = ", ".join(sorted({f["asset_id"] for f in a["findings"] if f.get("asset_id")}) or [])
             find_titles = "; ".join(f.get("title", "") for f in a["findings"]) or "-"
             cves = ", ".join(sorted({c["cve"] for c in a["cves"] if c.get("cve")})) or "-"
             rows.append("\t".join([

@@ -1,0 +1,19 @@
+# Lint config for Scylax (stdlib-only; ruff runs in CI, not at runtime).
+target-version = "py311"
+line-length = 130
+extend-exclude = [".claude", "runs", "samples"]
+
+[lint]
+# Default rule set (pyflakes F + pycodestyle E subset). Style-only rules that
+# would churn the codebase without finding bugs are ignored below.
+ignore = [
+    "E741",  # ambiguous name `l`: used idiomatically for "line" in loops
+    "E731",  # lambda assignment: small local key/format helpers
+]
+
+[lint.per-file-ignores]
+# Entry points / tests that must adjust sys.path or check the Python version
+# before importing the package.
+"scylax.py" = ["E402"]
+"recon/sample_generator.py" = ["E402"]
+"tests/test_smoke.py" = ["E402"]
