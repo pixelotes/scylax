@@ -12,6 +12,8 @@ runs/<scope>/<date>/
   report.html              Interactive dark-mode dashboard (tabs + CLI terminal explorer + Assets tab)
   report.md                Full Markdown report with collapsible CLI evidence
   report_data.json         Consolidated, versioned export: assets + findings + relations + meta (see below)
+  findings.sarif           SARIF 2.1.0 export of the findings (see below)
+  findings.csv             CSV export of the findings (see below)
   ai_bundle.md             Compact, self-contained companion for LLM analysis (see below)
   findings_auto.md / .tsv  Prioritised finding candidates (Asset ID + Target columns; rows grouped by asset)
   assets.tsv               Asset inventory: id, type, label, key, product/version, open ports, findings, CVEs
@@ -137,6 +139,31 @@ Regenerate it for an existing run without re-scanning:
 python3 scylax.py --export runs/<scope>/<date>/
 ```
 
+## Standard formats: `findings.sarif` and `findings.csv`
+
+Both are derived from `report_data.json` (the single source) and written every run
+right after it, and by `--export`. They are best-effort: a failure logs a warning
+and never breaks the run. Findings are **candidates** (`status: "candidate"`) for a
+human to validate, not verdicts.
+
+**`findings.sarif`** (SARIF 2.1.0, one `run`, tool `Scylax`): one `rule` per
+distinct finding rule (key prefix, e.g. `cors`; `nuclei:<template>` for nuclei) and
+one `result` per finding. Severity maps to `level`: critical/high -> `error`,
+medium -> `warning`, low/info -> `note` (rules also carry a GitHub
+`security-severity` score). Findings are about hosts and URLs, not source files, so
+`physicalLocation.artifactLocation.uri` is the URL when the target is one,
+`host:<host-or-ip[:port]>` otherwise (`scylax:tenant` when there is no target),
+plus a `logicalLocations` entry with the Scylax asset label. `partialFingerprints`
+(`scylaxFindingKey/v1`) hash the stable finding key, so trackers dedupe across
+runs. `properties` holds severity, asset ids, targets, CVEs, phase and status.
+
+**`findings.csv`** (RFC 4180, UTF-8 without BOM): columns `id, severity, title,
+rule, asset_ids, assets, targets, cves, phase, status, first_seen, age_days,
+evidence`. Multi-values are joined with `; `. `first_seen`/`age_days` come from the
+scope's `findings_history.json` when present. Cells starting with `= + - @`, TAB
+or CR get a leading `'` to neutralise spreadsheet formula injection (evidence is
+untrusted internet data).
+
 ## The AI bundle (`ai_bundle.md`)
 
 A compact, **self-contained** Markdown companion built for LLM analysis:
@@ -160,6 +187,7 @@ python3 scylax.py --report-from-bundle runs/<scope>/<date>/ai_bundle.md
 |---|---|
 | `assets.tsv` | Asset inventory: id, type, label, key, product/version, open ports, findings, CVEs. |
 | `report_data.json` | Consolidated, versioned export: meta, KPIs, assets, findings, and asset↔finding relations. |
+| `findings.sarif` / `findings.csv` | Standard-format exports of the findings (SARIF 2.1.0, CSV). |
 | `../assets.json` | Scope-level asset-id registry (stable ids across runs). |
 | `osint/new_subdomains.txt` | Subdomains first seen this run. |
 | `osint/ct_first_seen.tsv` | First certificate seen per host (certspotter fallback). |

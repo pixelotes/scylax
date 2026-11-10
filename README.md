@@ -492,6 +492,8 @@ runs/<scope>/<date>/
   report_data.json         Consolidated, versioned export (schema_version): meta, KPIs, the asset inventory,
                            every finding, and the explicit asset<->finding relations. The stable contract for a
                            downstream report generator; written every run, regenerate alone with --export.
+  findings.sarif / .csv    Standard exports of the findings (SARIF 2.1.0 for code-scanning/DefectDojo; CSV, formula-safe),
+                           derived from report_data.json; written every run and by --export
   findings_auto.md / .tsv  Prioritised finding candidates (Asset ID column, all affected assets; rows grouped by asset)
   findings.jsonl           The same candidates, one JSON object per line (status "candidate"), for trackers/scripts
   assets.jsonl             Hostnames, live web URLs and open TCP ports collected by the run

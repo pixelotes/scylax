@@ -237,6 +237,12 @@ def write_report_data(data: Any, run_dir: Path) -> Path:
     doc = build_report_data(data)
     path = Path(run_dir) / "report_data.json"
     path.write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    # Standard formats (SARIF, CSV) derived from the same document; best-effort.
+    try:
+        from recon.export_formats import write_findings_exports
+        write_findings_exports(doc, Path(run_dir))
+    except Exception:
+        pass
     return path
 
 
