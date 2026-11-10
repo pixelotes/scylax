@@ -292,7 +292,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--resume",
         action="store_true",
-        help="skip phases already completed (without tool failures) in this run folder; scope edits invalidate them",
+        help="skip phases already completed (without tool failures) in this run folder, and inside an unfinished phase "
+             "skip the units already done (per IP/batch/account); scope edits invalidate both",
     )
     parser.add_argument(
         "--jobs",
@@ -540,8 +541,10 @@ def _execute_phase(
     checkpoint; return a scheduler outcome. May run in a worker thread (--jobs)."""
     fn = PHASE_MAP[p]
     DRY_RUN.phase = p
-    reset_phase_console(ctx.console_dir, p)
-    _clear_tool_failures(ctx.run_dir, p)
+    if not args.resume:  # --resume keeps console evidence + finished units of an interrupted phase
+        reset_phase_console(ctx.console_dir, p)
+        checkpoint.clear_units(ctx.run_dir, p)
+    _clear_tool_failures(ctx.run_dir, p)  # re-recorded by the units that re-run
     checkpoint.clear(ctx.run_dir, p)
     try:
         fn(ctx, dm, log)

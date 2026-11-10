@@ -191,12 +191,22 @@ The pipeline is built so you never lose work:
 - Either way, Scylax prints the exact **recovery commands** on exit:
 
 ```bash
-# continue the phases that didn't finish (completed phases are skipped)
+# continue the phases that didn't finish (completed phases are skipped, and an
+# interrupted phase only redoes the units it hadn't finished: IPs, batches, accounts...)
 python3 scylax.py -s scopes/acme.toml -d 2026-11-04 --resume
 
 # or just rebuild the report from whatever was collected
 python3 scylax.py --report-only runs/acme/2026-11-04
 ```
+
+**Unit-level resume.** Inside a phase, each finished unit of work (one IP's nmap pass,
+a nuclei batch, an edge device, a cloud IP, one account's breach lookup, one Shodan IP,
+one content-discovery host) leaves a small marker in `.checkpoints/<phase>.units/`, written
+only after the command succeeded (never after a timeout or tool failure). With `--resume`,
+a phase that did not finish keeps its console evidence and its outputs, skips the marked
+units and runs only the rest; aggregate files are rebuilt from all units. Editing the scope
+invalidates the markers. Without `--resume` the markers are cleared and everything runs fresh
+(an nmap output file alone is no longer trusted: a killed scan can leave a partial one).
 
 When `alert_webhook` (or `SCYLAX_ALERT_WEBHOOK`) is configured, an interrupted run
 or a run with a crashed phase also posts a **failure alert** to the webhook — so an
