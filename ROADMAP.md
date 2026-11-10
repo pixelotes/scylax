@@ -20,6 +20,8 @@ Ground rules for everything below:
 | Expiring suppressions with reason, owner and expiry. Suppressed findings stay visible and come back when the suppression expires. | `recon/suppressions.py` | #18 |
 | Run-to-run trends: summary in `diff.md`, "What changed" card in the HTML report, MTTR, age buckets, oldest open high/critical findings. | `recon/trends.py` | #18 |
 | Ruff lint job in CI (pinned version, `ruff.toml`). | `.github/workflows/ci.yml` | #19, #20 |
+| pip-audit of the Python venvs in the Docker image, on Dockerfile changes and weekly. Fails only on new vulnerabilities that have a fix. | `.github/workflows/deps-audit.yml` | #21 |
+| Resume and scheduler gaps: a second Ctrl-C force-exits, setup crashes are recorded, phase C retries hosts the limiter abandoned, phase 7 CPE/CVE lookups are saved as resume units. | `recon/scheduler.py`, `recon/cli.py` | #21 |
 
 ## Next
 
@@ -27,18 +29,16 @@ Ground rules for everything below:
   NVD, HIBP, XposedOrNot and Shodan, so a change in their response format
   fails a test instead of silently producing empty results. Optionally a
   scheduled job that hits the real APIs.
+- [ ] **SpiderFoot dependencies.** SpiderFoot master pins `cryptography`
+  3.4.8, `lxml` 4.9.4 and `pyopenssl` 21.0.0, with 15 known vulnerabilities
+  that have fixes. They are accepted in `.github/pip-audit-ignore.txt` for now.
+  Options: pin a SpiderFoot release with newer pins, override the versions in
+  the Dockerfile, or drop SpiderFoot from the image.
 - [ ] **Finish CI.** `pyproject.toml` (tool config only, no packaging yet),
-  `mypy` in non-strict mode, coverage report, `pip-audit` for dev tooling,
-  Trivy scan of the Docker image.
-- [ ] **Gaps left by the resume work.**
-  - Phase 7 CPE/CVE lookups are cached in memory only; persist them per unit.
-  - Phases 1 and 6 restart from scratch.
-  - Phase C with the native probe marks a host done even when the adaptive
-    limiter gave up on it; it should be retried on resume.
-- [ ] **Gaps left by the scheduler.**
-  - A second Ctrl-C while running phases drain should force-exit.
-  - If a phase's setup (before the phase function runs) fails in a worker
-    thread, the crash is not written to `tool_failures.tsv`.
+  `mypy` in non-strict mode, coverage report, Trivy scan of the Docker image.
+  Run the dependency audit once against the real image (so far only checked
+  against equivalent local venvs).
+- [ ] **Resume for phases 1 and 6.** Both still restart from scratch.
 - [ ] **Per-host parallelism inside phases.** OSINT, DNS, per-IP nmap and the
   cloud annexes still process hosts one by one. Any pool must respect the
   limits in `recon/resilience.py` and the active-traffic lane.
