@@ -43,6 +43,7 @@ accepted. The canonical form is shown below.
 | `authorisation_ref` | string | **Required for active phases.** Ticket / reference. |
 | `runs_dir` | string | Where `runs/<scope>/<date>/` is written. Absolute, or relative to the scope file. Empty → `<cwd>/runs`. |
 | `alert_webhook` | string | Teams/JSON incoming webhook; new & reappeared high/critical findings are posted after a run. Also `SCYLAX_ALERT_WEBHOOK`. Empty disables alerts. |
+| `suppressions_file` | string | Auditor suppressions file (see [Finding suppressions](#finding-suppressions-suppressionstoml)). Resolved like `owned_ips_file`. Empty → `<scope dir>/<scope-name>.suppressions.toml` when that file exists. |
 
 ### `[targets]`
 
@@ -131,6 +132,54 @@ Credentials come from the environment: `M365_TENANT_ID` / `M365_CLIENT_ID` /
 
 Minimum acceptable versions used by triage flags — update per assessment cycle:
 `min_apache` (`2.4.65`), `min_nginx` (`1.26.0`), `min_routeros` (`7.15`).
+
+## Finding suppressions (`.suppressions.toml`)
+
+Scylax reports *candidates*; a suppression records the auditor's decision about
+one of them — accepted risk, false positive or compensating control — with an
+owner, a reason and an expiry date. Suppressed findings never disappear
+silently: they leave the active outputs (`findings_auto.*`, `findings.jsonl`,
+KPIs and severity counts) and are listed in `suppressed.md` and in the report's
+**Suppressed** table. When the expiry date passes they are active again.
+
+The file is `scopes/<scope-name>.suppressions.toml` next to the scope (picked up
+automatically) or whatever `suppressions_file` names. Real suppression files are
+git-ignored like scope files; `scopes/example.suppressions.toml` is the tracked
+example.
+
+```toml
+[[suppress]]
+key = "dnssec:fabrikam.io"          # exact finding key (findings_auto.tsv column 2), or:
+reason = "Accepted risk: registrar has no DNSSEC; migration planned"   # required
+owner = "jdoe"                      # required
+expires = 2027-06-30                # required TOML date, inclusive
+ticket = "SEC-1042"                 # optional
+
+[[suppress]]
+rule = "cors"                       # rule id = the key up to the first ':' (globs ok: "cve-*")
+target = "*.dev.contoso.com"        # optional glob on the target, its hostname, or the key's resource
+reason = "Compensating control: VPN + WAF in front of dev hosts"
+owner = "asmith"
+expires = 2027-03-31
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| `key` | one of `key`/`rule` | Exact finding key. |
+| `rule` | one of `key`/`rule` | Rule id: the key prefix before the first `:` (`spf`, `cors`, `mgmt`, `cve-high`, `az-storage-public`…). Glob patterns allowed. |
+| `target` | no | Glob matched (case-insensitive) against the finding's target, its URL hostname, its `host`/`ip` without port, and the resource part of the key. |
+| `reason`, `owner` | yes | Who decided and why. |
+| `expires` | yes | TOML date (`2027-03-31`, not quoted). Valid through that day. |
+| `ticket` | no | Tracker reference. |
+
+Behaviour during triage (all messages go to `gaps.txt`):
+
+- invalid entries (missing `reason`/`owner`/`expires`, no `key`/`rule`, bad date) are ignored with a warning; a broken file never stops the run;
+- an expired suppression no longer applies: `suppression expired on <date> for <key>`;
+- a suppression expiring within 14 days, or more than a year ahead, is warned about;
+- an entry that matched no finding is reported as a **stale suppression**, so the file stays clean.
+
+`--check-config` validates the file too (same warnings, nothing applied).
 
 ## Environment variables
 

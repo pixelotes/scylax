@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import datetime
 import json
 from pathlib import Path
 import re
@@ -12,7 +13,7 @@ from recon.config import RunContext
 from recon.deps import DependencyManager
 from recon.report import generate_reports, nsg_ports
 from recon.webprobe import is_hash_label, is_ingress_default_404
-from recon import export, notify
+from recon import export, notify, suppressions
 from recon.runner import (
     Logger,
     http_get,
@@ -1012,6 +1013,12 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     def target_of(key: str) -> str:
         return targets.get(key) or finding_target(key)
 
+    # Auditor suppressions: suppressed findings leave the active outputs but are
+    # still written (suppressed.md/.tsv), recorded in the history and reported.
+    observed = list(deduped)
+    applied = _apply_suppressions(ctx, deduped, target_of, log)
+    deduped = applied.active
+
     tsv_lines = [f"{sev}\t{key}\t{title}\t{ev}\t{target_of(key)}\n" for sev, key, title, ev in deduped]
     (ctx.run_dir / "findings_auto.tsv").write_text("".join(tsv_lines), encoding="utf-8")
     export.write_findings_jsonl(
@@ -1034,6 +1041,9 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         esc_ev = ev.replace("|", "\\|")
         esc_target = target_of(key).replace("|", "\\|")
         md_lines.append(f"| {sev} | {esc_title} | {esc_target} | {esc_ev} | `{key}` |")
+    if applied.suppressed:
+        md_lines += ["", f"_{len(applied.suppressed)} suppressed candidate(s) (accepted by the auditor, "
+                         f"with reason and expiry) are listed in {suppressions.SUPPRESSED_MD}._"]
 
     gaps_file = ctx.run_dir / "gaps.txt"
     if gaps_file.is_file():
@@ -1058,7 +1068,10 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
         curr_map.setdefault(item[1], item)
     history_path = ctx.runs_root / ctx.scope.name / "findings_history.json"
     had_history = history_path.is_file()
-    history = _update_history(ctx, curr_map)
+    observed_map: dict[str, tuple[str, str, str, str]] = {}
+    for item in observed:  # suppressed findings are still observed: keep their history
+        observed_map.setdefault(item[1], item)
+    history = _update_history(ctx, observed_map)
 
     if ctx.prev_run_dir is None and had_history:
         log.warn(
@@ -1089,10 +1102,13 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
             # Unknown origin, or run.meta missing: assume it was checked
             return ph is None or not curr_phases or not prev_phases or (ph in curr_phases and ph in prev_phases)
 
-        gone = prev_keys - curr_keys
+        supp_map = {item[1]: (item, s) for item, s in applied.suppressed}
+        newly_suppressed, reactivated = _suppression_diff(ctx.prev_run_dir, prev_keys, curr_keys, applied)
+        gone = prev_keys - curr_keys - set(supp_map)  # suppressed now is not "resolved"
         resolved_keys = sorted(k for k in gone if _checked_in_both(k))
         unchecked_keys = sorted(k for k in gone if not _checked_in_both(k))
-        new_all = curr_keys - prev_keys
+        new_all = curr_keys - prev_keys - reactivated
+        reactivated_keys = sorted(reactivated)
         reappeared_keys = sorted(k for k in new_all if len(history.get(k, {}).get("seen", [])) > 1)
         new_keys = sorted(k for k in new_all if k not in reappeared_keys)
         persisting_keys = sorted(curr_keys & prev_keys)
@@ -1109,7 +1125,11 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
             ("Resolved", resolved_keys, prev_map, False),
             ("Not re-checked", unchecked_keys, prev_map, False),
             ("Persisting", persisting_keys, curr_map, True),
+            ("Reactivated (suppression expired)", reactivated_keys, curr_map, True),
+            ("Suppressed (accepted)", sorted(newly_suppressed), {k: v[0] for k, v in supp_map.items()}, False),
         ):
+            if not keys and section_name.startswith(("Reactivated", "Suppressed")):
+                continue  # only shown when suppressions are in play
             diff_lines.append("")
             diff_lines.append(f"## {section_name} ({len(keys)})")
             diff_lines.append("")
@@ -1118,13 +1138,17 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
                 diff_lines.append("")
             for k in sorted(keys, key=lambda x: (SEVERITY_ORDER.get(src[x][0], 99), x)):
                 f_item = src[k]
-                diff_lines.append(f"- **{f_item[0]}** {f_item[2]} - {f_item[3]}" + (_age(k) if with_age else ""))
+                extra = _age(k) if with_age else ""
+                if k in supp_map and section_name.startswith("Suppressed"):
+                    s = supp_map[k][1]
+                    extra = f" _(accepted by {s.owner} until {s.expires}: {s.reason})_"
+                diff_lines.append(f"- **{f_item[0]}** {f_item[2]} - {f_item[3]}" + extra)
 
         (ctx.run_dir / "diff.md").write_text("\n".join(diff_lines) + "\n", encoding="utf-8")
         log.ok(f"diff vs {ctx.prev_run_dir.name} in diff.md")
 
         # Alert on new / reappeared high and critical findings
-        alert_keys = [k for k in (new_keys + reappeared_keys)
+        alert_keys = [k for k in (new_keys + reappeared_keys + reactivated_keys)
                       if curr_map[k][0] in ("critical", "high")]
         if alert_keys and notify.webhook_url(ctx.scope):
             alert_findings = [curr_map[k] for k in sorted(
@@ -1143,6 +1167,42 @@ def phaseT(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
     md_path, html_path = generate_reports(ctx.run_dir)
     log.ok(f"{len(deduped)} candidates -> findings_auto.md, report.md, report.html")
+
+
+def _run_day(run_date: str) -> datetime.date:
+    """The run's date (run directories are named YYYY-MM-DD[...]); today if not."""
+    try:
+        return datetime.date.fromisoformat(run_date[:10])
+    except ValueError:
+        return datetime.date.today()
+
+
+def _apply_suppressions(ctx: RunContext, findings: list, target_of, log: Logger) -> suppressions.Applied:
+    """Load the scope's suppressions file, split findings into active and
+    suppressed, and write suppressed.md / suppressed.tsv. Never raises."""
+    today = _run_day(ctx.run_date)
+    sups: list[suppressions.Suppression] = []
+    explicit = getattr(ctx.scope, "suppressions_file", "")
+    path = suppressions.resolve_path(ctx.scope)
+    if explicit and path is None:
+        log.warn(f"suppressions_file not found: {explicit} - no suppression applied")
+    elif path is not None:
+        sups, warnings = suppressions.parse_file(path, today)
+        for w in warnings:
+            log.warn(w)
+    applied = suppressions.apply(findings, sups, target_of, today, log.warn)
+    suppressions.write_outputs(ctx.run_dir, applied, target_of, ctx.run_date)
+    if applied.suppressed:
+        log.info(f"{len(applied.suppressed)} finding(s) suppressed -> {suppressions.SUPPRESSED_MD}")
+    return applied
+
+
+def _suppression_diff(prev_run_dir: Path, prev_keys: set[str], curr_keys: set[str],
+                      applied: suppressions.Applied) -> tuple[set[str], set[str]]:
+    """(newly suppressed, reactivated) keys versus the previous run."""
+    prev_supp = {r["key"] for r in suppressions.load_suppressed(prev_run_dir)}
+    curr_supp = {item[1] for item, _ in applied.suppressed}
+    return suppressions.diff_buckets(prev_keys, curr_keys, prev_supp, curr_supp, set(applied.expired_keys))
 
 
 # Which phase produces each finding key (by prefix). Used so that a run that

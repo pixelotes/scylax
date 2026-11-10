@@ -176,6 +176,9 @@ class ScopeConfig:
     owned_ranges: List[str] = field(default_factory=list)
     owned_ips_file: str = ""
     runs_dir: str = ""
+    # Auditor suppressions (accepted risk / false positive), see recon/suppressions.py.
+    # Empty: scopes/<name>.suppressions.toml next to the scope file, if present.
+    suppressions_file: str = ""
     alert_webhook: str = ""
     content_discovery: bool = False
     saas_exposure: bool = False
@@ -451,6 +454,7 @@ class ScopeConfig:
             owned_ranges=_split_list(flat.get("owned_ranges")),
             owned_ips_file=str(flat.get("owned_ips_file") or "").strip(),
             runs_dir=str(flat.get("runs_dir") or flat.get("engagement_runs_dir") or "").strip(),
+            suppressions_file=str(flat.get("suppressions_file") or flat.get("engagement_suppressions_file") or "").strip(),
             alert_webhook=str(flat.get("alert_webhook") or flat.get("engagement_alert_webhook") or "").strip(),
             content_discovery=_as_bool(
                 flat.get("content_discovery_enabled")
@@ -667,7 +671,7 @@ class RunContext:
 _SCOPE_SCHEMA: dict[str, tuple[str, ...]] = {
     "": (  # top-level / flat keys
         "engagement", "scope_owner", "authorised_by", "authorisation_ref", "runs_dir",
-        "domains", "www_url", "hvt_ips", "edge_ips", "exclude_ips",
+        "suppressions_file", "domains", "www_url", "hvt_ips", "edge_ips", "exclude_ips",
         "owned_ranges", "owned_ips_file", "auto_discover", "auto_discover_targets",
         "skip_portscan_orgs", "apex_trusted_orgs", "use_amass",
         "edge_ports", "edge_max_rate", "nmap_max_rate", "httpx_rate", "nuclei_rate",
@@ -676,7 +680,8 @@ _SCOPE_SCHEMA: dict[str, tuple[str, ...]] = {
         "min_apache", "min_nginx", "min_routeros",
         "shodan_api_key", "shodan_key", "hibp_api_key", "hibp_key",
     ),
-    "engagement": ("engagement", "scope_owner", "authorised_by", "authorisation_ref", "runs_dir", "alert_webhook"),
+    "engagement": ("engagement", "scope_owner", "authorised_by", "authorisation_ref", "runs_dir", "alert_webhook",
+                   "suppressions_file"),
     "targets": (
         "domains", "www_url", "hvt_ips", "edge_ips", "exclude_ips", "owned_ranges",
         "owned_ips_file", "auto_discover", "auto_discover_targets", "skip_portscan_orgs",
@@ -750,6 +755,7 @@ def validate_scope(path: Path) -> tuple[list[str], list[str]]:
                      ("aws_inventory_file", scope.aws_inventory_file)):
         if f and scope.resolve_file(f) is None:
             errors.append(f"{label} not found: {f}")
+    _check_suppressions(scope, errors, warnings)
     if scope.saas_posture and not scope.saas_providers:
         warnings.append("saas_posture is on but no providers are listed")
     if not scope.authorised_by:
@@ -758,3 +764,25 @@ def validate_scope(path: Path) -> tuple[list[str], list[str]]:
         warnings.append("no owned_ranges / owned_ips_file: ownership allowlist disabled, "
                         "auto-discovered IPs will not be port/nuclei-scanned")
     return errors, warnings
+
+
+def _check_suppressions(scope: ScopeConfig, errors: list[str], warnings: list[str]) -> None:
+    """--check-config: the suppressions file exists and its entries are valid.
+    Invalid entries are only warnings: triage ignores them (never crashes)."""
+    from recon import suppressions  # local import: suppressions does not need config
+
+    path = suppressions.resolve_path(scope)
+    if scope.suppressions_file and path is None:
+        warnings.append(f"suppressions_file not found: {scope.suppressions_file} "
+                        f"(no suppression will be applied)")
+        return
+    if path is None:
+        return
+    today = datetime.date.today()
+    sups, problems = suppressions.parse_file(path, today)
+    warnings.extend(problems)
+    for s in sups:
+        if s.expires < today:
+            warnings.append(f"suppression #{s.index} ({s.label}) expired on {s.expires}: no longer applied")
+        elif (s.expires - today).days <= suppressions.NEAR_EXPIRY_DAYS:
+            warnings.append(f"suppression #{s.index} ({s.label}) expires on {s.expires}")
