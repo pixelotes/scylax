@@ -546,3 +546,9 @@ Run the built-in unit and smoke test suite (no network access required):
 ```bash
 python3 -m unittest discover -s tests -v
 ```
+
+Lint (same pinned version and `ruff.toml` config as CI):
+
+```bash
+uvx ruff@0.8.4 check .
+```

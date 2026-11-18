@@ -14,7 +14,7 @@ project; each entry needs a body fingerprint so a plain 404 never alerts on its 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable
 
 

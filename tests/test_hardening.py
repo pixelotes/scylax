@@ -139,7 +139,8 @@ class ExportTests(unittest.TestCase):
     def test_findings_and_assets_jsonl(self):
         with tempfile.TemporaryDirectory() as d:
             rd = Path(d)
-            (rd / "osint").mkdir(); (rd / "web").mkdir(); (rd / "scan").mkdir()
+            for sub in ("osint", "web", "scan"):
+                (rd / sub).mkdir()
             (rd / "osint" / "subdomains.txt").write_text("a.example.com\n")
             (rd / "web" / "httpx_all.json").write_text(json.dumps({"url": "https://a.example.com", "status_code": 200, "title": "t"}) + "\n")
             (rd / "scan" / "full_1.2.3.4.nmap").write_text("443/tcp open  https\n")

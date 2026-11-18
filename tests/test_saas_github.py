@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from recon.config import RunContext, ScopeConfig
 from recon.runner import CmdResult, Logger
