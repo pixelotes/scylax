@@ -99,7 +99,7 @@ def ensure_venv(
             import venv
             venv.create(venv_dir, with_pip=True)
             venv_python = get_venv_python(venv_dir)
-            sys.stderr.write(f"[+] Virtual environment created successfully.\n")
+            sys.stderr.write("[+] Virtual environment created successfully.\n")
             sys.stderr.write("[*] Launching pipeline inside .venv...\n\n")
             sys.stderr.flush()
 

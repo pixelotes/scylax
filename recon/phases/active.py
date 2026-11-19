@@ -13,7 +13,7 @@ from pathlib import Path
 from recon import checkpoint
 from recon.config import RunContext
 from recon.deps import DependencyManager
-from recon.runner import Logger, ev, http_get, infra_failure, record_tool_failure, record_virtual_cmd, run_cmd
+from recon.runner import Logger, ev, http_get, infra_failure, record_tool_failure, record_virtual_cmd
 from recon import tlsposture, wellknown
 from recon.phases.osint import NON_PUBLIC_TLDS
 from recon.resilience import AdaptiveLimiter

@@ -10,12 +10,12 @@ from pathlib import Path
 import re
 import shutil
 import socket
-from typing import Any, List, Set, Tuple
+from typing import Any
 
 from recon import checkpoint
 from recon.config import RunContext
 from recon.deps import DependencyManager
-from recon.runner import Logger, ev, infra_failure, record_virtual_cmd, run_cmd
+from recon.runner import Logger, ev, infra_failure
 from recon.scope import ip_in, is_public_ip, parse_networks
 
 __all__ = [

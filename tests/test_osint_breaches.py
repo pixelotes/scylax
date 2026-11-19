@@ -1,6 +1,5 @@
 """Unit tests for HaveIBeenPwned and threat intelligence breach auditing."""
 
-import json
 import tempfile
 import unittest
 from pathlib import Path

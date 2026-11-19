@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
-from recon.plugins import PLUGINS, Plugin, get_plugin, list_plugins
-from recon.plugins.base import PluginKind, PluginStatus
+from recon.plugins import PLUGINS, Plugin, get_plugin
+from recon.plugins.base import PluginStatus
 from recon.runner import have
 
 

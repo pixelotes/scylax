@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from recon import notify
-from recon.config import RunContext, ScopeConfig, validate_scope
+from recon.config import ScopeConfig, validate_scope
 from recon.runner import (
     CmdResult,
     infra_failure,

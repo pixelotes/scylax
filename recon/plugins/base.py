@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import os
-import shutil
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Callable, Sequence
 
-from recon.runner import CmdResult, have, run_cmd
+from recon.runner import have, run_cmd
 
 
 class PluginKind(str, Enum):

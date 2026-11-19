@@ -15,6 +15,20 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        # Pinned so a new ruff release never breaks CI unannounced; config in ruff.toml.
+        run: python -m pip install --disable-pip-version-check ruff==0.8.4
+      - name: Ruff check
+        run: ruff check --output-format=github .
+
   tests:
     name: Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest

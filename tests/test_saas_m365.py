@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 from recon.config import RunContext, ScopeConfig
 from recon.runner import Logger
@@ -98,9 +98,6 @@ class TestSaasM365Posture(unittest.TestCase):
 
         now_utc = datetime.datetime.now(datetime.timezone.utc)
         thirty_days_ago = (now_utc - datetime.timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        hundred_days_ago = (now_utc - datetime.timedelta(days=100)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        future_15d = (now_utc + datetime.timedelta(days=15)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        past_10d = (now_utc - datetime.timedelta(days=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         if ca_policies is None:
             ca_policies = []
@@ -616,7 +613,7 @@ class TestSaasM365Posture(unittest.TestCase):
         self.assertNotIn("m365-risk-detections", keys)
 
         # Verify warning was logged for unavailable endpoints
-        warn_messages = [call[0][0] for call in mock_warn.call_args_list]
+        warn_messages = [c[0][0] for c in mock_warn.call_args_list]
         self.assertTrue(
             any("M365: /identityProtection/riskyUsers unavailable (403)" in m for m in warn_messages)
         )
@@ -650,7 +647,7 @@ class TestSaasM365Posture(unittest.TestCase):
         mock_http.side_effect = _paged_handler
 
         with patch.dict(os.environ, self.mock_env, clear=True):
-            findings = run(self.ctx, self.log, self.out_dir)
+            run(self.ctx, self.log, self.out_dir)
 
         raw_users_path = self.out_dir / "raw" / "users.json"
         self.assertTrue(raw_users_path.is_file())
