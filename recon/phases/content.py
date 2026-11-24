@@ -16,6 +16,7 @@ import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Callable
 
 from recon import checkpoint
 from recon.config import RunContext
@@ -107,12 +108,21 @@ def _owned_bases(ctx: RunContext) -> list[str]:
     return sorted(bases)
 
 
+def _host(base: str) -> str:
+    return urllib.parse.urlsplit(base).netloc.lower()
+
+
 def _native_probe(bases: list[str], words: list[str], delay: float, log: Logger,
-                  units: "checkpoint.Units | None" = None) -> list[tuple[str, str, int, int]]:
+                  units: "checkpoint.Units | None" = None,
+                  on_abandoned: Callable[[str], None] | None = None) -> list[tuple[str, str, int, int]]:
+    """Probe ``words`` on each base. A base the limiter gave up on (throttling or
+    not answering) keeps its partial rows but is not marked done, so --resume
+    retries it; ``on_abandoned(base)`` reports it."""
     words_sig = hashlib.sha256("\n".join(words).encode()).hexdigest()[:12]
     rows: list[tuple[str, str, int, int]] = []
     budget = MAX_REQUESTS
-    get = AdaptiveLimiter(base_delay=0.0).wrap(http_get)  # backs off / gives up on hosts that throttle
+    limiter = AdaptiveLimiter(base_delay=0.0)  # backs off / gives up on hosts that throttle
+    get = limiter.wrap(http_get)
 
     def probe(base: str, word: str) -> tuple[str, str, int, int] | None:
         url = f"{base}/{word}"
@@ -141,7 +151,10 @@ def _native_probe(bases: list[str], words: list[str], delay: float, log: Logger,
                 if r:
                     base_rows.append(r)
         rows.extend(base_rows)
-        if units is not None:
+        if limiter.gave_up(_host(base)):
+            if on_abandoned is not None:
+                on_abandoned(base)
+        elif units is not None:
             units.mark(key, base_rows)
         if delay:
             time.sleep(delay)
@@ -187,11 +200,14 @@ def _gobuster(ctx: RunContext, dm: DependencyManager, log: Logger, base: str,
 
 
 def _traversal_probe(bases: list[str], delay: float,
-                     units: "checkpoint.Units | None" = None) -> list[tuple[str, str, str]]:
+                     units: "checkpoint.Units | None" = None,
+                     on_abandoned: Callable[[str], None] | None = None) -> list[tuple[str, str, str]]:
     """Probe each base for path traversal; keep only responses matching the signature.
-    Returns (url, payload_category, snippet)."""
+    Returns (url, payload_category, snippet). An abandoned base (see
+    _native_probe) is not marked done and is reported via ``on_abandoned``."""
     hits: list[tuple[str, str, str]] = []
-    get = AdaptiveLimiter().wrap(http_get)
+    limiter = AdaptiveLimiter()
+    get = limiter.wrap(http_get)
     for base in bases:
         key = f"traversal:{base}:{len(TRAVERSAL_PROBES)}"
         if units is not None and units.done(key):
@@ -211,7 +227,11 @@ def _traversal_probe(bases: list[str], delay: float,
             if delay:
                 time.sleep(delay)
         hits.extend(base_hits)
-        if units is not None:
+        # A confirmed hit is complete evidence even if the host throttled later.
+        if not base_hits and limiter.gave_up(_host(base)):
+            if on_abandoned is not None:
+                on_abandoned(base)
+        elif units is not None:
             units.mark(key, base_hits)
     return hits
 
@@ -239,13 +259,25 @@ def phaseC(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
 
     log.info(f"content discovery: {len(words)} paths on {len(bases)} owned host(s)")
     units = checkpoint.Units(ctx, "C")
+
+    def abandoned(tool: str, what: str) -> Callable[[str], None]:
+        # Recorded as a tool failure: the phase is not checkpointed (--resume
+        # retries just this host) and triage treats the probe's findings on it
+        # as not re-checked rather than resolved.
+        def report(base: str) -> None:
+            log.warn(f"{what}: gave up on {base} (throttled or not answering) - results for it are "
+                     "incomplete; --resume retries it")
+            record_tool_failure(ctx.run_dir, "C", tool, f"gave up on {_host(base)} (throttled or not answering)")
+        return report
+
     if dm.is_available("gobuster"):
         rows: list[tuple[str, str, int, int]] = []
         for base in bases:
             rows.extend(_gobuster(ctx, dm, log, base, wordlist_path, delay, units))
     else:
         log.info("gobuster not available - using the native content-discovery probe")
-        rows = _native_probe(bases, words, delay, log, units)
+        rows = _native_probe(bases, words, delay, log, units,
+                             on_abandoned=abandoned("content-probe", "content discovery"))
 
     tsv_rows = []
     for base, path, status, size in rows:
@@ -264,7 +296,7 @@ def phaseC(ctx: RunContext, dm: DependencyManager, log: Logger) -> None:
     trav_file = ctx.web_dir / "path_traversal.tsv"
     if trav_file.is_file():
         trav_file.unlink()
-    trav = _traversal_probe(bases, delay, units)
+    trav = _traversal_probe(bases, delay, units, on_abandoned=abandoned("traversal-probe", "path-traversal probe"))
     trav_rows = [f"{url}\t{target}\t{snippet}" for url, target, snippet in trav]
     trav_file.write_text("".join(f"{r}\n" for r in trav_rows), encoding="utf-8")
     if trav:

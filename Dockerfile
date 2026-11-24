@@ -82,6 +82,14 @@ RUN git clone --depth 1 --branch "${SPIDERFOOT_REF}" https://github.com/smicalle
  && chmod +x /opt/tools/bin/spiderfoot \
  && spiderfoot -h >/dev/null
 
+# Upgrade the bundled pip (the base image ships an older pip with fixable
+# advisories) on the base interpreter and on any venv that actually has pip.
+# pip is build-time only here - Scylax runs stdlib-only - but deps-audit flags it.
+RUN python -m pip install --no-cache-dir --upgrade pip \
+ && for v in /opt/venvs/*; do \
+      "$v/bin/python" -m pip install --no-cache-dir --upgrade pip 2>/dev/null || true; \
+    done
+
 # Bake the nuclei templates so phase 8 works offline and does not spend its
 # timeout downloading them (refresh with: docker run ... --entrypoint nuclei scylax -update-templates)
 RUN nuclei -update-templates -silent \
@@ -139,6 +147,7 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends build-essential; \
     uv venv --python 3.12 /opt/venvs/prowler; \
     uv pip install --python /opt/venvs/prowler/bin/python prowler; \
+    /opt/venvs/prowler/bin/python -m pip install --no-cache-dir --upgrade pip 2>/dev/null || true; \
     ln -s /opt/venvs/prowler/bin/prowler /opt/tools/bin/prowler; \
     apt-get purge -y --auto-remove build-essential; \
     rm -rf /var/lib/apt/lists/*; \

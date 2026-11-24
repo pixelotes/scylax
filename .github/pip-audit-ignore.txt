@@ -1,0 +1,22 @@
+# Vulnerability IDs (GHSA-..., PYSEC-..., CVE-...) that deps-audit.yml ignores.
+# One ID per line, with the reason after a '#'. Review entries when bumping
+# THEHARVESTER_REF / SPIDERFOOT_REF, and delete them once fixed upstream.
+#
+# Baseline accepted 2026-11-10: SpiderFoot master pins old versions in its
+# requirements.txt (cryptography 3.4.8, lxml 4.9.4, pyopenssl 21.0.0) and we do
+# not control them. New findings still fail the job.
+PYSEC-2023-11  # cryptography 3.4.8, fix 39.0.1
+PYSEC-2026-800  # cryptography 3.4.8, fix 39.0.1
+PYSEC-2026-1283  # cryptography 3.4.8, fix 42.0.0
+PYSEC-2023-254  # cryptography 3.4.8, fix 41.0.6
+PYSEC-2026-1285  # cryptography 3.4.8, fix 42.0.2
+PYSEC-2026-2141  # cryptography 3.4.8, fix 46.0.5
+PYSEC-2026-35  # cryptography 3.4.8, fix 46.0.6
+PYSEC-2026-3553  # cryptography 3.4.8, fix 49.0.0
+PYSEC-2026-3554  # cryptography 3.4.8, fix 49.0.0
+GHSA-5cpq-8wj7-hf2v  # cryptography 3.4.8, fix 41.0.0
+GHSA-jm77-qphf-c4w8  # cryptography 3.4.8, fix 41.0.3
+GHSA-v8gr-m533-ghj9  # cryptography 3.4.8, fix 41.0.4
+GHSA-537c-gmf6-5ccf  # cryptography 3.4.8, fix 48.0.1
+PYSEC-2026-87  # lxml 4.9.4, fix 6.1.0
+PYSEC-2026-2268  # pyopenssl 21.0.0, fix 26.0.0
